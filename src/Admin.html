@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<base target="_top">
+<style>
+  :root {
+    --bg: #10131a;
+    --panel: #1b2130;
+    --panel-2: #232b3d;
+    --gold: #f5c451;
+    --text: #f2f4f8;
+    --muted: #9aa4b8;
+    --ok: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: var(--bg); color: var(--text);
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+
+  .status { background: var(--panel); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .statusrow { display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 12px; }
+  .stat .label { font-size: 12px; color: var(--muted); }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .value.gold { color: var(--gold); }
+  .qnow { font-size: 15px; color: var(--muted); margin-bottom: 12px; }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    padding: 10px 18px; font-size: 15px; font-weight: 700; font-family: inherit;
+    border: none; border-radius: 8px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .btn-gold { background: var(--gold); color: #1a1200; }
+  .btn-sub { background: var(--panel-2); color: var(--text); }
+  .btn-start { background: var(--panel-2); color: var(--gold); border: 1px solid var(--gold); padding: 6px 14px; font-size: 14px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; font-size: 14px; border-bottom: 1px solid #2b344a; }
+  th { background: var(--panel-2); color: var(--muted); font-size: 12px; }
+  tr.active td { background: #2a3150; }
+  td.text { max-width: 420px; }
+  .nowrap { white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>クイズ大会 管理画面</h1>
+  <div class="status" id="status">読み込み中...</div>
+  <div id="questions"></div>
+</div>
+
+<script>
+  var POLL_INTERVAL_MS = 2500;
+  var PHASE_LABEL = { waiting: '待機中', question: '出題中', answer: '正解発表中' };
+
+  var st = { data: null, offset: 0, bestRtt: Infinity, busy: false, tableKey: '' };
+
+  function now() { return Date.now() + st.offset; }
+
+  function poll() {
+    var t0 = Date.now();
+    google.script.run
+      .withSuccessHandler(function (d) {
+        var t1 = Date.now();
+        if (t1 - t0 < st.bestRtt) {
+          st.bestRtt = t1 - t0;
+          st.offset = d.serverNow - (t0 + t1) / 2;
+        }
+        st.data = d;
+        render();
+      })
+      .withFailureHandler(function (e) {
+        document.getElementById('status').textContent = '通信エラー: ' + e.message;
+      })
+      .adminGetDashboard();
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function render() {
+    var d = st.data;
+    if (!d) return;
+    var s = d.state;
+    var q = s.question;
+
+    // 現在の問題の進行状況
+    var timing = '';
+    if (q && s.phase === 'question') {
+      var toStart = s.startAt - now();
+      if (toStart > 0) {
+        timing = '表示まで ' + Math.ceil(toStart / 1000) + ' 秒';
+      } else {
+        var remain = Math.max(0, q.limitSec * 1000 - (now() - s.startAt));
+        timing = '残り ' + (remain / 1000).toFixed(1) + ' 秒';
+      }
+    }
+
+    document.getElementById('status').innerHTML =
+      '<div class="statusrow">'
+      + stat('状態', PHASE_LABEL[s.phase] || s.phase, true)
+      + stat('参加者', d.participantCount + ' 人')
+      + stat('この問題の回答', d.answerCount + ' 件')
+      + (timing ? stat('タイマー', timing) : '')
+      + '</div>'
+      + '<div class="qnow">' + (q ? esc(q.id) + ' : ' + esc(q.text) : '問題は選択されていません') + '</div>'
+      + '<div class="actions">'
+      + '<button class="btn-gold" onclick="reveal()" ' + (q && s.phase === 'question' ? '' : 'disabled') + '>正解発表</button>'
+      + '<button class="btn-sub" onclick="toWaiting()">待機に戻す</button>'
+      + '</div>';
+
+    renderTable(d);
+  }
+
+  function stat(label, value, gold) {
+    return '<div class="stat"><div class="label">' + esc(label) + '</div>'
+      + '<div class="value' + (gold ? ' gold' : '') + '">' + esc(value) + '</div></div>';
+  }
+
+  // 問題一覧は内容が変わったときだけ描き直す（ボタン押下と再描画が競合しないように）
+  function renderTable(d) {
+    var activeId = d.state.question ? d.state.question.id : '';
+    var key = d.questions.map(function (q) { return q.id; }).join(',') + '|' + activeId + '|' + st.busy;
+    if (key === st.tableKey) return;
+    st.tableKey = key;
+
+    var html = '<table><tr><th>ID</th><th>問題</th><th class="nowrap">種別</th><th class="nowrap">制限</th><th></th></tr>';
+    d.questions.forEach(function (q) {
+      html += '<tr class="' + (q.id === activeId ? 'active' : '') + '">'
+        + '<td class="nowrap">' + esc(q.id) + '</td>'
+        + '<td class="text">' + esc(q.text) + '</td>'
+        + '<td class="nowrap">' + esc(q.type) + '</td>'
+        + '<td class="nowrap">' + q.limitSec + '秒</td>'
+        + '<td class="nowrap"><button class="btn-start" onclick="start(\'' + esc(q.id) + '\')" '
+        + (st.busy ? 'disabled' : '') + '>出題</button></td>'
+        + '</tr>';
+    });
+    html += '</table>';
+    document.getElementById('questions').innerHTML = html;
+  }
+
+  function command(fn, arg) {
+    if (st.busy) return;
+    st.busy = true;
+    st.tableKey = '';
+    var runner = google.script.run
+      .withSuccessHandler(function (d) { st.busy = false; st.tableKey = ''; st.data = d; render(); })
+      .withFailureHandler(function (e) { st.busy = false; st.tableKey = ''; alert(e.message); render(); });
+    if (arg === undefined) runner[fn](); else runner[fn](arg);
+  }
+
+  function start(id) {
+    if (st.data && st.data.state.phase === 'question' && !confirm('出題中です。切り替えますか？')) return;
+    command('adminStartQuestion', id);
+  }
+  function reveal() { command('adminRevealAnswer'); }
+  function toWaiting() { command('adminSetWaiting'); }
+
+  poll();
+  setInterval(poll, POLL_INTERVAL_MS);
+  setInterval(render, 100);
+</script>
+</body>
+</html>

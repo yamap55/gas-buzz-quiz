@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<base target="_top">
+<style>
+  :root {
+    --bg: #10131a;
+    --panel: #1b2130;
+    --panel-2: #232b3d;
+    --gold: #f5c451;
+    --gold-dim: #8a6d24;
+    --text: #f2f4f8;
+    --muted: #9aa4b8;
+    --ok: #4ade80;
+    --ng: #f87171;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  #app { padding: 16px; max-width: 640px; margin: 0 auto; }
+
+  .center { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 16px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .big { font-size: 28px; font-weight: 700; }
+
+  /* 「Q」「A」のバッジ */
+  .badge {
+    flex: 0 0 auto;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--gold);
+    color: #1a1200;
+    font-weight: 800; font-size: 24px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .qblock { display: flex; gap: 12px; align-items: flex-start; background: var(--panel); border-radius: 12px; padding: 14px; }
+  .qtext { font-size: 19px; font-weight: 600; line-height: 1.5; padding-top: 6px; }
+
+  .ablock { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; }
+  .choices { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; }
+
+  .choice {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; text-align: left;
+    background: var(--panel-2); color: var(--text);
+    border: 2px solid transparent; border-radius: 12px;
+    padding: 14px; font-size: 17px; font-family: inherit;
+    cursor: pointer;
+  }
+  .choice:active { background: var(--gold-dim); }
+  .choice .num {
+    flex: 0 0 auto; width: 28px; height: 28px; border-radius: 6px;
+    background: var(--gold); color: #1a1200;
+    font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .choice.correct { border-color: var(--ok); }
+  .choice.mine { border-color: var(--gold); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .imgchoice { position: relative; padding: 0; border: 2px solid transparent; border-radius: 12px; overflow: hidden; background: var(--panel-2); cursor: pointer; }
+  .imgchoice img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+  .imgchoice .num { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; border-radius: 6px; background: var(--gold); color: #1a1200; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .imgchoice.correct { border-color: var(--ok); }
+  .imgchoice.mine { border-color: var(--gold); }
+
+  .timerwrap { margin-top: 16px; }
+  .timerbar { height: 10px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
+  .timerfill { height: 100%; background: var(--gold); transition: width 0.1s linear; }
+  .timertext { text-align: right; font-size: 14px; color: var(--muted); margin-top: 6px; }
+
+  input[type=text] {
+    width: 100%; padding: 14px; font-size: 17px; font-family: inherit;
+    border-radius: 10px; border: 1px solid #3a4459;
+    background: var(--panel-2); color: var(--text);
+  }
+  button.primary {
+    width: 100%; padding: 14px; font-size: 17px; font-weight: 700; font-family: inherit;
+    border: none; border-radius: 10px; background: var(--gold); color: #1a1200; cursor: pointer;
+  }
+  .count { font-size: 96px; font-weight: 800; color: var(--gold); line-height: 1; }
+  .verdict { font-size: 32px; font-weight: 800; }
+  .verdict.ok { color: var(--ok); }
+  .verdict.ng { color: var(--ng); }
+  .warn { color: var(--ng); font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+  var POLL_INTERVAL_MS = 2500;
+  var TICK_INTERVAL_MS = 100;
+
+  var st = {
+    name: '',
+    state: null,
+    offset: 0,        // サーバー時刻 - ローカル時刻
+    bestRtt: Infinity,
+    lastKey: '',
+    sendFailed: false,
+  };
+
+  /* ---- localStorage（回答の二重送信防止と再訪時の復帰に使う） ---- */
+
+  function ls(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* 無視 */ } }
+
+  function myAnswer(questionId) {
+    var v = ls('quiz.ans.' + questionId);
+    return v ? Number(v) : 0;
+  }
+
+  /* ---- 時刻同期 ---- */
+
+  // 往復時間が最小だったサンプルのオフセットを採用する
+  function now() { return Date.now() + st.offset; }
+
+  function poll() {
+    var t0 = Date.now();
+    google.script.run
+      .withSuccessHandler(function (s) {
+        var t1 = Date.now();
+        var rtt = t1 - t0;
+        if (rtt < st.bestRtt) {
+          st.bestRtt = rtt;
+          st.offset = s.serverNow - (t0 + t1) / 2;
+        }
+        st.state = s;
+      })
+      .withFailureHandler(function () { /* 次のポーリングで回復するので何もしない */ })
+      .getState();
+  }
+
+  /* ---- 画面の決定 ---- */
+
+  function currentView() {
+    if (!st.name) return { screen: 'name' };
+    var s = st.state;
+    if (!s) return { screen: 'loading' };
+    if (s.phase === 'waiting' || !s.question) return { screen: 'waiting' };
+
+    var q = s.question;
+    var mine = myAnswer(q.id);
+    if (s.phase === 'answer') return { screen: 'result', q: q, mine: mine, correct: s.correct };
+    if (now() < s.startAt) return { screen: 'countdown', q: q };
+    if (mine) return { screen: 'answered', q: q, mine: mine };
+    if (now() - s.startAt > q.limitSec * 1000) return { screen: 'closed', q: q };
+    return { screen: 'quiz', q: q };
+  }
+
+  function viewKey(v) {
+    return [v.screen, v.q ? v.q.id : '', v.mine || '', st.sendFailed ? 'e' : ''].join('|');
+  }
+
+  /* ---- 描画 ---- */
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function questionHtml(q, opts) {
+    opts = opts || {};
+    var html = '<div class="qblock"><div class="badge">Q</div><div class="qtext">' + esc(q.text) + '</div></div>';
+
+    if (q.type === 'image') {
+      html += '<div class="grid">';
+      for (var i = 0; i < 4; i++) {
+        html += '<button class="imgchoice ' + choiceClass(i + 1, opts) + '" ' + choiceAttr(i + 1, opts) + '>'
+          + '<span class="num">' + (i + 1) + '</span>'
+          + '<img src="' + esc(q.choices[i]) + '" alt="">'
+          + '</button>';
+      }
+      html += '</div>';
+    } else {
+      html += '<div class="ablock"><div class="badge">A</div><div class="choices">';
+      for (var j = 0; j < 4; j++) {
+        html += '<button class="choice ' + choiceClass(j + 1, opts) + '" ' + choiceAttr(j + 1, opts) + '>'
+          + '<span class="num">' + (j + 1) + '</span><span>' + esc(q.choices[j]) + '</span>'
+          + '</button>';
+      }
+      html += '</div></div>';
+    }
+    return html;
+  }
+
+  function choiceClass(n, opts) {
+    var cls = [];
+    if (opts.correct === n) cls.push('correct');
+    if (opts.mine === n) cls.push('mine');
+    return cls.join(' ');
+  }
+
+  function choiceAttr(n, opts) {
+    return opts.selectable ? 'onclick="submit(' + n + ')"' : 'disabled';
+  }
+
+  function timerHtml() {
+    return '<div class="timerwrap">'
+      + '<div class="timerbar"><div class="timerfill" id="timerfill"></div></div>'
+      + '<div class="timertext" id="timertext"></div>'
+      + '</div>';
+  }
+
+  function render(force) {
+    var v = currentView();
+    var key = viewKey(v);
+    if (!force && key === st.lastKey) { tickTimer(v); return; }
+    st.lastKey = key;
+
+    var app = document.getElementById('app');
+    var html = '';
+
+    switch (v.screen) {
+      case 'name':
+        html = '<div class="center">'
+          + '<div class="big">早押しクイズ大会</div>'
+          + '<div class="muted">名前を入力してください</div>'
+          + '<input type="text" id="nameInput" placeholder="山田太郎" autocomplete="off">'
+          + '<button class="primary" onclick="register()">参加する</button>'
+          + '</div>';
+        break;
+
+      case 'loading':
+        html = '<div class="center"><div class="muted">接続中...</div></div>';
+        break;
+
+      case 'waiting':
+        html = '<div class="center">'
+          + '<div class="big">準備中</div>'
+          + '<div class="muted">' + esc(st.name) + ' さんで参加中<br>次の問題をお待ちください</div>'
+          + '</div>';
+        break;
+
+      case 'countdown':
+        html = '<div class="center">'
+          + '<div class="muted">まもなく出題</div>'
+          + '<div class="count" id="countnum">-</div>'
+          + '</div>';
+        break;
+
+      case 'quiz':
+        html = questionHtml(v.q, { selectable: true }) + timerHtml();
+        break;
+
+      case 'answered':
+        html = '<div class="center">'
+          + '<div class="big">回答しました</div>'
+          + '<div class="count">' + v.mine + '</div>'
+          + '<div class="muted">正解発表をお待ちください</div>'
+          + (st.sendFailed ? '<div class="warn">送信に失敗しました。司会者に申し出てください</div>' : '')
+          + '</div>';
+        break;
+
+      case 'closed':
+        html = '<div class="center">'
+          + '<div class="big">時間切れ</div>'
+          + '<div class="muted">正解発表をお待ちください</div>'
+          + '</div>';
+        break;
+
+      case 'result':
+        var verdict = !v.mine
+          ? '<div class="verdict ng">未回答</div>'
+          : (v.mine === v.correct ? '<div class="verdict ok">正解</div>' : '<div class="verdict ng">不正解</div>');
+        html = '<div style="text-align:center;margin-bottom:14px">' + verdict + '</div>'
+          + questionHtml(v.q, { correct: v.correct, mine: v.mine });
+        break;
+    }
+
+    app.innerHTML = html;
+
+    if (v.screen === 'name') {
+      var input = document.getElementById('nameInput');
+      input.value = ls('quiz.name') || '';
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') register(); });
+    }
+    tickTimer(v);
+  }
+
+  // 残り時間・カウントダウンだけを毎tick更新する（画面全体は再描画しない）
+  function tickTimer(v) {
+    var s = st.state;
+    if (!s || !s.question) return;
+
+    if (v.screen === 'countdown') {
+      var el = document.getElementById('countnum');
+      if (el) el.textContent = Math.max(0, Math.ceil((s.startAt - now()) / 1000));
+      return;
+    }
+    if (v.screen !== 'quiz') return;
+
+    var limitMs = v.q.limitSec * 1000;
+    var remain = Math.max(0, limitMs - (now() - s.startAt));
+    var fill = document.getElementById('timerfill');
+    var text = document.getElementById('timertext');
+    if (fill) fill.style.width = (remain / limitMs * 100) + '%';
+    if (text) text.textContent = '残り ' + (remain / 1000).toFixed(1) + ' 秒';
+  }
+
+  /* ---- 操作 ---- */
+
+  function register() {
+    var name = document.getElementById('nameInput').value.trim();
+    if (!name) return;
+    st.name = name;
+    lsSet('quiz.name', name);
+    google.script.run.registerParticipant(name);
+    render(true);
+  }
+
+  function submit(choice) {
+    var s = st.state;
+    if (!s || !s.question) return;
+    var q = s.question;
+    if (myAnswer(q.id)) return;
+
+    // 押した瞬間の時刻で経過時間を確定させ、先に画面を切り替える
+    var elapsedMs = now() - s.startAt;
+    lsSet('quiz.ans.' + q.id, String(choice));
+    st.sendFailed = false;
+    render(true);
+
+    google.script.run
+      .withSuccessHandler(function () {})
+      .withFailureHandler(function () { st.sendFailed = true; render(true); })
+      .submitAnswer({ questionId: q.id, name: st.name, choice: choice, elapsedMs: elapsedMs });
+  }
+
+  /* ---- 起動 ---- */
+
+  st.name = ls('quiz.name') || '';
+  render(true);
+  poll();
+  setInterval(poll, POLL_INTERVAL_MS);
+  setInterval(function () { render(false); }, TICK_INTERVAL_MS);
+</script>
+</body>
+</html>
