@@ -112,8 +112,11 @@
   function ls(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* 無視 */ } }
 
-  function myAnswer(questionId) {
-    var v = ls('quiz.ans.' + questionId);
+  // 出題のたびに startAt が変わるため、キーに含めることで再出題時に前回の回答が残らない
+  function answerKey(s) { return 'quiz.ans.' + s.question.id + '.' + s.startAt; }
+
+  function myAnswer(s) {
+    var v = ls(answerKey(s));
     return v ? Number(v) : 0;
   }
 
@@ -147,7 +150,7 @@
     if (s.phase === 'waiting' || !s.question) return { screen: 'waiting' };
 
     var q = s.question;
-    var mine = myAnswer(q.id);
+    var mine = myAnswer(s);
     if (s.phase === 'answer') return { screen: 'result', q: q, mine: mine, correct: s.correct };
     if (now() < s.startAt) return { screen: 'countdown', q: q };
     if (mine) return { screen: 'answered', q: q, mine: mine };
@@ -319,11 +322,11 @@
     var s = st.state;
     if (!s || !s.question) return;
     var q = s.question;
-    if (myAnswer(q.id)) return;
+    if (myAnswer(s)) return;
 
     // 押した瞬間の時刻で経過時間を確定させ、先に画面を切り替える
     var elapsedMs = now() - s.startAt;
-    lsSet('quiz.ans.' + q.id, String(choice));
+    lsSet(answerKey(s), String(choice));
     st.sendFailed = false;
     render(true);
 
