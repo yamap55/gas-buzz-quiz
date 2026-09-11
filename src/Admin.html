@@ -10,7 +10,7 @@
     --gold: #f5c451;
     --text: #f2f4f8;
     --muted: #9aa4b8;
-    --ok: #4ade80;
+    --ng: #f87171;
   }
   * { box-sizing: border-box; }
   body {
@@ -27,6 +27,7 @@
   .stat .value { font-size: 22px; font-weight: 700; }
   .value.gold { color: var(--gold); }
   .qnow { font-size: 15px; color: var(--muted); margin-bottom: 12px; }
+  .error { color: var(--ng); font-size: 13px; margin-bottom: 12px; }
 
   .actions { display: flex; gap: 10px; flex-wrap: wrap; }
   button {
@@ -49,12 +50,33 @@
 <body>
 <div class="wrap">
   <h1>クイズ大会 管理画面</h1>
-  <div class="status" id="status">読み込み中...</div>
+
+  <!--
+    ボタンを含む要素は作り直さず、値の書き換えだけで更新する。
+    100msごとに innerHTML で組み立て直すと、mousedown と mouseup の間に
+    ボタンのDOMが消えてクリックが成立しなくなるため。
+  -->
+  <div class="status">
+    <div class="statusrow">
+      <div class="stat"><div class="label">状態</div><div class="value gold" id="v-phase">-</div></div>
+      <div class="stat"><div class="label">参加者</div><div class="value" id="v-participants">-</div></div>
+      <div class="stat"><div class="label">この問題の回答</div><div class="value" id="v-answers">-</div></div>
+      <div class="stat"><div class="label">タイマー</div><div class="value" id="v-timer">-</div></div>
+    </div>
+    <div class="qnow" id="v-question">読み込み中...</div>
+    <div class="error" id="v-error"></div>
+    <div class="actions">
+      <button class="btn-gold" id="btn-reveal" disabled>正解発表</button>
+      <button class="btn-sub" id="btn-waiting" disabled>待機に戻す</button>
+    </div>
+  </div>
+
   <div id="questions"></div>
 </div>
 
 <script>
   var POLL_INTERVAL_MS = 2500;
+  var TICK_INTERVAL_MS = 100;
   var PHASE_LABEL = { waiting: '待機中', question: '出題中', answer: '正解発表中' };
 
   var st = { data: null, offset: 0, bestRtt: Infinity, busy: false, tableKey: '' };
@@ -71,16 +93,18 @@
           st.offset = d.serverNow - (t0 + t1) / 2;
         }
         st.data = d;
+        setText('v-error', '');
         render();
       })
-      .withFailureHandler(function (e) {
-        document.getElementById('status').textContent = '通信エラー: ' + e.message;
-      })
+      .withFailureHandler(function (e) { setText('v-error', '通信エラー: ' + e.message); })
       .adminGetDashboard();
   }
 
-  function esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  /* ---- 描画 ---- */
+
+  function setText(id, value) {
+    var el = document.getElementById(id);
+    if (el && el.textContent !== value) el.textContent = value;
   }
 
   function render() {
@@ -89,68 +113,84 @@
     var s = d.state;
     var q = s.question;
 
-    // 現在の問題の進行状況
-    var timing = '';
-    if (q && s.phase === 'question') {
-      var toStart = s.startAt - now();
-      if (toStart > 0) {
-        timing = '表示まで ' + Math.ceil(toStart / 1000) + ' 秒';
-      } else {
-        var remain = Math.max(0, q.limitSec * 1000 - (now() - s.startAt));
-        timing = '残り ' + (remain / 1000).toFixed(1) + ' 秒';
-      }
-    }
+    setText('v-phase', PHASE_LABEL[s.phase] || s.phase);
+    setText('v-participants', d.participantCount + ' 人');
+    setText('v-answers', d.answerCount + ' 件');
+    setText('v-timer', timerText(s, q));
+    setText('v-question', q ? q.id + ' : ' + q.text : '問題は選択されていません');
 
-    document.getElementById('status').innerHTML =
-      '<div class="statusrow">'
-      + stat('状態', PHASE_LABEL[s.phase] || s.phase, true)
-      + stat('参加者', d.participantCount + ' 人')
-      + stat('この問題の回答', d.answerCount + ' 件')
-      + (timing ? stat('タイマー', timing) : '')
-      + '</div>'
-      + '<div class="qnow">' + (q ? esc(q.id) + ' : ' + esc(q.text) : '問題は選択されていません') + '</div>'
-      + '<div class="actions">'
-      + '<button class="btn-gold" onclick="reveal()" ' + (q && s.phase === 'question' ? '' : 'disabled') + '>正解発表</button>'
-      + '<button class="btn-sub" onclick="toWaiting()">待機に戻す</button>'
-      + '</div>';
+    document.getElementById('btn-reveal').disabled = st.busy || !q || s.phase !== 'question';
+    document.getElementById('btn-waiting').disabled = st.busy;
 
     renderTable(d);
   }
 
-  function stat(label, value, gold) {
-    return '<div class="stat"><div class="label">' + esc(label) + '</div>'
-      + '<div class="value' + (gold ? ' gold' : '') + '">' + esc(value) + '</div></div>';
+  function timerText(s, q) {
+    if (!q || s.phase !== 'question') return '-';
+    var toStart = s.startAt - now();
+    if (toStart > 0) return '表示まで ' + Math.ceil(toStart / 1000) + ' 秒';
+    var remain = Math.max(0, q.limitSec * 1000 - (now() - s.startAt));
+    return '残り ' + (remain / 1000).toFixed(1) + ' 秒';
   }
 
-  // 問題一覧は内容が変わったときだけ描き直す（ボタン押下と再描画が競合しないように）
+  // 問題一覧は内容が変わったときだけ組み立て、それ以外は状態の反映だけ行う
   function renderTable(d) {
+    var key = d.questions.map(function (q) { return q.id; }).join(',');
+    if (key !== st.tableKey) {
+      st.tableKey = key;
+      buildTable(d.questions);
+    }
     var activeId = d.state.question ? d.state.question.id : '';
-    var key = d.questions.map(function (q) { return q.id; }).join(',') + '|' + activeId + '|' + st.busy;
-    if (key === st.tableKey) return;
-    st.tableKey = key;
-
-    var html = '<table><tr><th>ID</th><th>問題</th><th class="nowrap">種別</th><th class="nowrap">制限</th><th></th></tr>';
-    d.questions.forEach(function (q) {
-      html += '<tr class="' + (q.id === activeId ? 'active' : '') + '">'
-        + '<td class="nowrap">' + esc(q.id) + '</td>'
-        + '<td class="text">' + esc(q.text) + '</td>'
-        + '<td class="nowrap">' + esc(q.type) + '</td>'
-        + '<td class="nowrap">' + q.limitSec + '秒</td>'
-        + '<td class="nowrap"><button class="btn-start" onclick="start(\'' + esc(q.id) + '\')" '
-        + (st.busy ? 'disabled' : '') + '>出題</button></td>'
-        + '</tr>';
+    var rows = document.querySelectorAll('#questions tr[data-id]');
+    Array.prototype.forEach.call(rows, function (tr) {
+      tr.classList.toggle('active', tr.getAttribute('data-id') === activeId);
+      tr.querySelector('button').disabled = st.busy;
     });
-    html += '</table>';
-    document.getElementById('questions').innerHTML = html;
   }
+
+  function buildTable(questions) {
+    var table = document.createElement('table');
+    table.appendChild(buildRow('th', ['ID', '問題', '種別', '制限', '']));
+
+    questions.forEach(function (q) {
+      var tr = buildRow('td', [q.id, q.text, q.type, q.limitSec + '秒', '']);
+      tr.setAttribute('data-id', q.id);
+      tr.children[1].className = 'text';
+
+      var button = document.createElement('button');
+      button.className = 'btn-start';
+      button.textContent = '出題';
+      button.addEventListener('click', function () { start(q.id); });
+      tr.children[4].appendChild(button);
+
+      table.appendChild(tr);
+    });
+
+    var host = document.getElementById('questions');
+    host.innerHTML = '';
+    host.appendChild(table);
+  }
+
+  function buildRow(tag, values) {
+    var tr = document.createElement('tr');
+    values.forEach(function (value) {
+      var cell = document.createElement(tag);
+      cell.className = 'nowrap';
+      cell.textContent = value;
+      tr.appendChild(cell);
+    });
+    return tr;
+  }
+
+  /* ---- 操作 ---- */
 
   function command(fn, arg) {
     if (st.busy) return;
     st.busy = true;
-    st.tableKey = '';
+    render();
     var runner = google.script.run
-      .withSuccessHandler(function (d) { st.busy = false; st.tableKey = ''; st.data = d; render(); })
-      .withFailureHandler(function (e) { st.busy = false; st.tableKey = ''; alert(e.message); render(); });
+      .withSuccessHandler(function (d) { st.busy = false; st.data = d; render(); })
+      .withFailureHandler(function (e) { st.busy = false; setText('v-error', e.message); render(); });
     if (arg === undefined) runner[fn](); else runner[fn](arg);
   }
 
@@ -158,12 +198,15 @@
     if (st.data && st.data.state.phase === 'question' && !confirm('出題中です。切り替えますか？')) return;
     command('adminStartQuestion', id);
   }
-  function reveal() { command('adminRevealAnswer'); }
-  function toWaiting() { command('adminSetWaiting'); }
+
+  /* ---- 起動 ---- */
+
+  document.getElementById('btn-reveal').addEventListener('click', function () { command('adminRevealAnswer'); });
+  document.getElementById('btn-waiting').addEventListener('click', function () { command('adminSetWaiting'); });
 
   poll();
   setInterval(poll, POLL_INTERVAL_MS);
-  setInterval(render, 100);
+  setInterval(render, TICK_INTERVAL_MS);
 </script>
 </body>
 </html>
