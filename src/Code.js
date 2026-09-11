@@ -16,6 +16,7 @@ const SHEET = {
 };
 
 const PROP_STATE = 'state';
+const PROP_ADMIN_KEY = 'adminKey';
 
 // 出題操作から一斉表示までの猶予。全端末がポーリングで startAt を受け取る時間を確保する
 const REVEAL_DELAY_MS = 8000;
@@ -33,11 +34,59 @@ const COL_LAST_STARTED_AT = 10;
 /* ========== エントリポイント ========== */
 
 function doGet(e) {
-  const page = (e && e.parameter && e.parameter.page) || '';
-  const file = page === 'admin' ? 'Admin' : 'Index';
-  return HtmlService.createHtmlOutputFromFile(file)
+  const params = (e && e.parameter) || {};
+  const output = isAdminRequest_(params)
+    ? adminPage_()
+    : HtmlService.createHtmlOutputFromFile('Index');
+  return output
     .setTitle('早押しクイズ大会')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/** 管理画面には合言葉を埋め込む。google.script.run の呼び出しに添えるため */
+function adminPage_() {
+  const template = HtmlService.createTemplateFromFile('Admin');
+  template.adminKey = adminKey_();
+  return template.evaluate();
+}
+
+/**
+ * ウェブアプリ全体の公開設定は、参加者がGoogleログインなしで参加するために
+ * ANYONE_ANONYMOUS にする必要がある。そのため管理画面は合言葉で切り分ける。
+ * 一致しない場合は参加者画面を返し、管理画面の存在自体を示さない。
+ */
+function isAdminRequest_(params) {
+  if (params.page !== 'admin') return false;
+  const expected = PropertiesService.getScriptProperties().getProperty(PROP_ADMIN_KEY);
+  return Boolean(expected) && params.key === expected;
+}
+
+/** 合言葉を取得する。未設定なら生成して保存する */
+function adminKey_() {
+  const props = PropertiesService.getScriptProperties();
+  let key = props.getProperty(PROP_ADMIN_KEY);
+  if (!key) {
+    key = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    props.setProperty(PROP_ADMIN_KEY, key);
+  }
+  return key;
+}
+
+/**
+ * 管理操作の実行を許可してよいか検証する。
+ * 参加者画面からでも google.script.run で関数を呼べてしまうため、
+ * 画面の出し分けだけでなくサーバー側の操作にも合言葉を要求する。
+ */
+function requireAdmin_(key) {
+  const expected = PropertiesService.getScriptProperties().getProperty(PROP_ADMIN_KEY);
+  if (!expected || key !== expected) throw new Error('権限がありません');
+}
+
+/** 管理画面のURLを表示する（エディタから実行し、実行ログで確認する） */
+function showAdminUrl() {
+  const url = ScriptApp.getService().getUrl() + '?page=admin&key=' + adminKey_();
+  Logger.log(url);
+  return url;
 }
 
 /* ========== 状態管理 ========== */
@@ -111,7 +160,9 @@ function restoreStateFromSheet() {
 
 /* ========== 管理画面から呼ばれる操作 ========== */
 
-function adminStartQuestion(questionId) {
+function adminStartQuestion(key, questionId) {
+  requireAdmin_(key);
+
   const q = findQuestion_(questionId);
   if (!q) throw new Error('問題が見つかりません: ' + questionId);
 
@@ -127,28 +178,37 @@ function adminStartQuestion(questionId) {
 
   // 記録用に出題時刻を残す
   sheet_(SHEET.QUESTIONS).getRange(q.rowIndex, COL_LAST_STARTED_AT).setValue(new Date());
-  return adminGetDashboard();
+  return dashboard_();
 }
 
-function adminRevealAnswer() {
+function adminRevealAnswer(key) {
+  requireAdmin_(key);
+
   const state = rawState_();
   if (!state.question) throw new Error('出題中の問題がありません');
   state.rev += 1;
   state.phase = 'answer';
   saveState_(state);
-  return adminGetDashboard();
+  return dashboard_();
 }
 
-function adminSetWaiting() {
+function adminSetWaiting(key) {
+  requireAdmin_(key);
+
   const prev = rawState_();
   const state = defaultState_();
   state.rev = prev.rev + 1;
   saveState_(state);
-  return adminGetDashboard();
+  return dashboard_();
 }
 
 /** 管理画面のポーリング用。参加者画面と違いスプレッドシートを読むが、接続は管理者1台だけ */
-function adminGetDashboard() {
+function adminGetDashboard(key) {
+  requireAdmin_(key);
+  return dashboard_();
+}
+
+function dashboard_() {
   const state = rawState_();
   return {
     state: state, // 管理画面には正解も渡す
@@ -271,6 +331,7 @@ function setupSheets() {
   if (blank && ss.getSheets().length > 1) ss.deleteSheet(blank);
 
   saveState_(defaultState_());
+  showAdminUrl();
 }
 
 function ensureSheet_(ss, name, header) {

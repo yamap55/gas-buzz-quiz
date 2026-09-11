@@ -79,6 +79,9 @@
   var TICK_INTERVAL_MS = 100;
   var PHASE_LABEL = { waiting: '待機中', question: '出題中', answer: '正解発表中' };
 
+  // 管理操作には合言葉を添える。サーバー側でも検証している
+  var ADMIN_KEY = '<?= adminKey ?>';
+
   var st = { data: null, offset: 0, bestRtt: Infinity, busy: false, tableKey: '' };
 
   function now() { return Date.now() + st.offset; }
@@ -97,7 +100,7 @@
         render();
       })
       .withFailureHandler(function (e) { setText('v-error', '通信エラー: ' + e.message); })
-      .adminGetDashboard();
+      .adminGetDashboard(ADMIN_KEY);
   }
 
   /* ---- 描画 ---- */
@@ -191,7 +194,7 @@
     var runner = google.script.run
       .withSuccessHandler(function (d) { st.busy = false; st.data = d; render(); })
       .withFailureHandler(function (e) { st.busy = false; setText('v-error', e.message); render(); });
-    if (arg === undefined) runner[fn](); else runner[fn](arg);
+    if (arg === undefined) runner[fn](ADMIN_KEY); else runner[fn](ADMIN_KEY, arg);
   }
 
   function start(id) {
