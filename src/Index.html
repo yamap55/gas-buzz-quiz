@@ -12,7 +12,9 @@
     --text: #f2f4f8;
     --muted: #9aa4b8;
     --ok: #4ade80;
+    --ok-ink: #04260f;
     --ng: #f87171;
+    --ng-bg: #4a1d1d;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -28,6 +30,12 @@
   .center { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 16px; }
   .muted { color: var(--muted); font-size: 14px; }
   .big { font-size: 28px; font-weight: 700; }
+
+  /* 状況を伝える帯。回答済み・時間切れ・正解発表で文言と色が変わる */
+  .banner { text-align: center; font-size: 20px; font-weight: 800; padding: 10px; border-radius: 10px; margin-bottom: 12px; }
+  .banner.info { background: var(--panel-2); color: var(--muted); }
+  .banner.ok { background: var(--ok); color: var(--ok-ink); }
+  .banner.ng { background: var(--ng); color: #2a0606; }
 
   /* 「Q」「A」のバッジ */
   .badge {
@@ -54,21 +62,42 @@
     padding: 14px; font-size: 17px; font-family: inherit;
     cursor: pointer;
   }
-  .choice:active { background: var(--gold-dim); }
+  .choice[disabled] { cursor: default; }
+  .choice:not([disabled]):active { background: var(--gold-dim); }
   .choice .num {
     flex: 0 0 auto; width: 28px; height: 28px; border-radius: 6px;
     background: var(--gold); color: #1a1200;
     font-weight: 700; display: flex; align-items: center; justify-content: center;
   }
-  .choice.correct { border-color: var(--ok); }
+  .choice .mark {
+    margin-left: auto; flex: 0 0 auto;
+    font-size: 12px; font-weight: 700;
+    background: var(--gold); color: #1a1200;
+    padding: 3px 10px; border-radius: 999px;
+  }
   .choice.mine { border-color: var(--gold); }
+  .choice.wrong { background: var(--ng-bg); border-color: var(--ng); }
+
+  /* 正解の行は塗りつぶしたうえで数回点滅させる */
+  .choice.correct { background: var(--ok); color: var(--ok-ink); border-color: var(--ok); animation: blinkFill 0.4s steps(1, end) 5; }
+  @keyframes blinkFill {
+    0%, 49% { background: var(--ok); color: var(--ok-ink); }
+    50%, 100% { background: var(--panel-2); color: var(--text); }
+  }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
-  .imgchoice { position: relative; padding: 0; border: 2px solid transparent; border-radius: 12px; overflow: hidden; background: var(--panel-2); cursor: pointer; }
+  .imgchoice { position: relative; padding: 0; border: 3px solid transparent; border-radius: 12px; overflow: hidden; background: var(--panel-2); cursor: pointer; }
+  .imgchoice[disabled] { cursor: default; }
   .imgchoice img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
   .imgchoice .num { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; border-radius: 6px; background: var(--gold); color: #1a1200; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-  .imgchoice.correct { border-color: var(--ok); }
+  .imgchoice .mark { position: absolute; bottom: 6px; right: 6px; font-size: 12px; font-weight: 700; background: var(--gold); color: #1a1200; padding: 3px 10px; border-radius: 999px; }
   .imgchoice.mine { border-color: var(--gold); }
+  .imgchoice.wrong { border-color: var(--ng); }
+  .imgchoice.correct { border-color: var(--ok); animation: blinkBorder 0.4s steps(1, end) 5; }
+  @keyframes blinkBorder {
+    0%, 49% { border-color: var(--ok); }
+    50%, 100% { border-color: transparent; }
+  }
 
   .timerwrap { margin-top: 16px; }
   .timerbar { height: 10px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
@@ -85,10 +114,7 @@
     border: none; border-radius: 10px; background: var(--gold); color: #1a1200; cursor: pointer;
   }
   .count { font-size: 96px; font-weight: 800; color: var(--gold); line-height: 1; }
-  .verdict { font-size: 32px; font-weight: 800; }
-  .verdict.ok { color: var(--ok); }
-  .verdict.ng { color: var(--ng); }
-  .warn { color: var(--ng); font-size: 13px; }
+  .warn { color: var(--ng); font-size: 13px; text-align: center; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -143,6 +169,11 @@
 
   /* ---- 画面の決定 ---- */
 
+  /**
+   * 回答後も問題の画面を出したままにする。
+   * 何の問題にどう答えたかが分からなくなるのを避けるため、
+   * 回答済み・時間切れ・正解発表はいずれも同じ画面の状態違いとして扱う。
+   */
   function currentView() {
     if (!st.name) return { screen: 'name' };
     var s = st.state;
@@ -151,15 +182,15 @@
 
     var q = s.question;
     var mine = myAnswer(s);
-    if (s.phase === 'answer') return { screen: 'result', q: q, mine: mine, correct: s.correct };
+    if (s.phase === 'answer') return { screen: 'question', mode: 'result', q: q, mine: mine, correct: s.correct };
     if (now() < s.startAt) return { screen: 'countdown', q: q };
-    if (mine) return { screen: 'answered', q: q, mine: mine };
-    if (now() - s.startAt > q.limitSec * 1000) return { screen: 'closed', q: q };
-    return { screen: 'quiz', q: q };
+    if (mine) return { screen: 'question', mode: 'answered', q: q, mine: mine };
+    if (now() - s.startAt > q.limitSec * 1000) return { screen: 'question', mode: 'closed', q: q };
+    return { screen: 'question', mode: 'open', q: q };
   }
 
   function viewKey(v) {
-    return [v.screen, v.q ? v.q.id : '', v.mine || '', st.sendFailed ? 'e' : ''].join('|');
+    return [v.screen, v.mode || '', v.q ? v.q.id : '', v.mine || '', st.sendFailed ? 'e' : ''].join('|');
   }
 
   /* ---- 描画 ---- */
@@ -168,24 +199,35 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  function bannerHtml(v) {
+    if (v.mode === 'answered') return '<div class="banner info">回答しました</div>';
+    if (v.mode === 'closed') return '<div class="banner info">時間切れ</div>';
+    if (v.mode !== 'result') return '';
+    if (!v.mine) return '<div class="banner ng">未回答</div>';
+    return v.mine === v.correct
+      ? '<div class="banner ok">正解</div>'
+      : '<div class="banner ng">不正解</div>';
+  }
+
   function questionHtml(q, opts) {
-    opts = opts || {};
     var html = '<div class="qblock"><div class="badge">Q</div><div class="qtext">' + esc(q.text) + '</div></div>';
 
     if (q.type === 'image') {
       html += '<div class="grid">';
-      for (var i = 0; i < 4; i++) {
-        html += '<button class="imgchoice ' + choiceClass(i + 1, opts) + '" ' + choiceAttr(i + 1, opts) + '>'
-          + '<span class="num">' + (i + 1) + '</span>'
-          + '<img src="' + esc(q.choices[i]) + '" alt="">'
+      for (var i = 1; i <= 4; i++) {
+        html += '<button class="imgchoice ' + choiceClass(i, opts) + '" ' + choiceAttr(i, opts) + '>'
+          + '<span class="num">' + i + '</span>'
+          + '<img src="' + esc(q.choices[i - 1]) + '" alt="">'
+          + markHtml(i, opts)
           + '</button>';
       }
       html += '</div>';
     } else {
       html += '<div class="ablock"><div class="badge">A</div><div class="choices">';
-      for (var j = 0; j < 4; j++) {
-        html += '<button class="choice ' + choiceClass(j + 1, opts) + '" ' + choiceAttr(j + 1, opts) + '>'
-          + '<span class="num">' + (j + 1) + '</span><span>' + esc(q.choices[j]) + '</span>'
+      for (var j = 1; j <= 4; j++) {
+        html += '<button class="choice ' + choiceClass(j, opts) + '" ' + choiceAttr(j, opts) + '>'
+          + '<span class="num">' + j + '</span><span>' + esc(q.choices[j - 1]) + '</span>'
+          + markHtml(j, opts)
           + '</button>';
       }
       html += '</div></div>';
@@ -196,12 +238,19 @@
   function choiceClass(n, opts) {
     var cls = [];
     if (opts.correct === n) cls.push('correct');
-    if (opts.mine === n) cls.push('mine');
+    if (opts.mine === n) {
+      cls.push('mine');
+      if (opts.correct && opts.correct !== n) cls.push('wrong');
+    }
     return cls.join(' ');
   }
 
   function choiceAttr(n, opts) {
     return opts.selectable ? 'onclick="submit(' + n + ')"' : 'disabled';
+  }
+
+  function markHtml(n, opts) {
+    return opts.mine === n ? '<span class="mark">あなたの回答</span>' : '';
   }
 
   function timerHtml() {
@@ -248,32 +297,15 @@
           + '</div>';
         break;
 
-      case 'quiz':
-        html = questionHtml(v.q, { selectable: true }) + timerHtml();
-        break;
-
-      case 'answered':
-        html = '<div class="center">'
-          + '<div class="big">回答しました</div>'
-          + '<div class="count">' + v.mine + '</div>'
-          + '<div class="muted">正解発表をお待ちください</div>'
-          + (st.sendFailed ? '<div class="warn">送信に失敗しました。司会者に申し出てください</div>' : '')
-          + '</div>';
-        break;
-
-      case 'closed':
-        html = '<div class="center">'
-          + '<div class="big">時間切れ</div>'
-          + '<div class="muted">正解発表をお待ちください</div>'
-          + '</div>';
-        break;
-
-      case 'result':
-        var verdict = !v.mine
-          ? '<div class="verdict ng">未回答</div>'
-          : (v.mine === v.correct ? '<div class="verdict ok">正解</div>' : '<div class="verdict ng">不正解</div>');
-        html = '<div style="text-align:center;margin-bottom:14px">' + verdict + '</div>'
-          + questionHtml(v.q, { correct: v.correct, mine: v.mine });
+      case 'question':
+        html = bannerHtml(v)
+          + questionHtml(v.q, {
+              selectable: v.mode === 'open',
+              mine: v.mine,
+              correct: v.mode === 'result' ? v.correct : 0,
+            })
+          + (v.mode === 'result' ? '' : timerHtml())
+          + (st.sendFailed ? '<div class="warn">送信に失敗しました。司会者に申し出てください</div>' : '');
         break;
     }
 
@@ -297,7 +329,7 @@
       if (el) el.textContent = Math.max(0, Math.ceil((s.startAt - now()) / 1000));
       return;
     }
-    if (v.screen !== 'quiz') return;
+    if (v.screen !== 'question' || v.mode === 'result') return;
 
     var limitMs = v.q.limitSec * 1000;
     var remain = Math.max(0, limitMs - (now() - s.startAt));
