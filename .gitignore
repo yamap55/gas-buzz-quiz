@@ -1,0 +1,17 @@
+# 依存パッケージ
+node_modules/
+
+# clasp の認証情報・プロジェクト設定（scriptId を含むため公開しない）
+.clasprc.json
+.clasp.json
+
+# 環境変数
+.env
+.env.*
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+
+# ログ
+*.log

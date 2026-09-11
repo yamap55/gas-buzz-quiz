@@ -1,0 +1,16 @@
+{
+  "name": "gas-buzz-quiz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Google Apps Script 製の早押し4択クイズアプリ",
+  "scripts": {
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp create-deployment",
+    "open": "clasp open-script",
+    "logs": "clasp tail-logs"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
+}
