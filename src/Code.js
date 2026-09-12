@@ -232,17 +232,31 @@ function loadQuestions_() {
 
   return sh.getRange(2, 1, last - 1, HEADER.QUESTIONS.length).getValues()
     .map(function (row, i) {
+      const type = String(row[2]).trim().toLowerCase() === 'image' ? 'image' : 'text';
+      const choices = [row[3], row[4], row[5], row[6]].map(String);
       return {
         rowIndex: i + 2,
         id: String(row[0]).trim(),
         text: String(row[1]),
-        type: String(row[2]).trim().toLowerCase() === 'image' ? 'image' : 'text',
-        choices: [row[3], row[4], row[5], row[6]].map(String),
+        type: type,
+        // 画像の選択肢だけ配列になる（1つの選択肢に複数枚を指定できるため）
+        choices: type === 'image' ? choices.map(splitImageUrls_) : choices,
         correct: Number(row[7]),
         limitSec: Number(row[8]) || 20,
       };
     })
     .filter(function (q) { return q.id; });
+}
+
+/**
+ * 画像の選択肢は | 区切りで複数枚を指定できる。
+ * URLに現れない文字のため、カンマと違って値の一部と取り違える余地がない。
+ */
+function splitImageUrls_(value) {
+  return String(value)
+    .split('|')
+    .map(function (url) { return url.trim(); })
+    .filter(Boolean);
 }
 
 function findQuestion_(questionId) {
