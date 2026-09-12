@@ -17,49 +17,58 @@
     --ng-bg: #4a1d1d;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
   body {
     margin: 0;
-    padding: 0;
     background: var(--bg);
     color: var(--text);
     font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
-    min-height: 100vh;
   }
-  #app { padding: 16px; max-width: 640px; margin: 0 auto; }
 
-  .center { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 16px; }
+  /* 画面全体を縦に使い切る。スマホのアドレスバーを考慮して dvh を優先する */
+  #app {
+    height: 100vh;
+    height: 100dvh;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .center { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 16px; }
   .muted { color: var(--muted); font-size: 14px; }
   .big { font-size: 28px; font-weight: 700; }
 
   /* 状況を伝える帯。回答済み・時間切れ・正解発表で文言と色が変わる */
-  .banner { text-align: center; font-size: 20px; font-weight: 800; padding: 10px; border-radius: 10px; margin-bottom: 12px; }
+  .banner { flex: 0 0 auto; text-align: center; font-size: 18px; font-weight: 800; padding: 8px; border-radius: 10px; }
   .banner.info { background: var(--panel-2); color: var(--muted); }
   .banner.ok { background: var(--ok); color: var(--ok-ink); }
   .banner.ng { background: var(--ng); color: #2a0606; }
 
-  /* 「Q」「A」のバッジ */
+  /* 問題文。「Q」のバッジは残すが、選択肢側の「A」の列は横幅を食うため置かない */
+  .qblock { flex: 0 0 auto; display: flex; gap: 10px; align-items: flex-start; background: var(--panel); border-radius: 12px; padding: 12px; }
   .badge {
     flex: 0 0 auto;
-    width: 44px; height: 44px;
+    width: 34px; height: 34px;
     border-radius: 50%;
     background: var(--gold);
     color: #1a1200;
-    font-weight: 800; font-size: 24px;
+    font-weight: 800; font-size: 20px;
     display: flex; align-items: center; justify-content: center;
   }
+  .qtext { font-size: 18px; font-weight: 600; line-height: 1.45; padding-top: 4px; }
 
-  .qblock { display: flex; gap: 12px; align-items: flex-start; background: var(--panel); border-radius: 12px; padding: 14px; }
-  .qtext { font-size: 19px; font-weight: 600; line-height: 1.5; padding-top: 6px; }
-
-  .ablock { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; }
-  .choices { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; }
-
+  /* 選択肢は残りの高さを均等に分け合う。押しやすさと縦幅の消化を兼ねる */
+  .choices { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   .choice {
+    flex: 1 1 0; min-height: 54px;
     display: flex; align-items: center; gap: 12px;
     width: 100%; text-align: left;
     background: var(--panel-2); color: var(--text);
     border: 2px solid transparent; border-radius: 12px;
-    padding: 14px; font-size: 17px; font-family: inherit;
+    padding: 10px 14px; font-size: 17px; font-family: inherit;
     cursor: pointer;
   }
   .choice[disabled] { cursor: default; }
@@ -85,10 +94,10 @@
     50%, 100% { background: var(--panel-2); color: var(--text); }
   }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; }
   .imgchoice { position: relative; padding: 0; border: 3px solid transparent; border-radius: 12px; overflow: hidden; background: var(--panel-2); cursor: pointer; }
   .imgchoice[disabled] { cursor: default; }
-  .imgchoice img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+  .imgchoice img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .imgchoice .num { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; border-radius: 6px; background: var(--gold); color: #1a1200; font-weight: 700; display: flex; align-items: center; justify-content: center; }
   .imgchoice .mark { position: absolute; bottom: 6px; right: 6px; font-size: 12px; font-weight: 700; background: var(--gold); color: #1a1200; padding: 3px 10px; border-radius: 999px; }
   .imgchoice.mine { border-color: var(--gold); }
@@ -99,10 +108,10 @@
     50%, 100% { border-color: transparent; }
   }
 
-  .timerwrap { margin-top: 16px; }
+  .timerwrap { flex: 0 0 auto; }
   .timerbar { height: 10px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
   .timerfill { height: 100%; background: var(--gold); transition: width 0.1s linear; }
-  .timertext { text-align: right; font-size: 14px; color: var(--muted); margin-top: 6px; }
+  .timertext { text-align: right; font-size: 14px; color: var(--muted); margin-top: 4px; }
 
   input[type=text] {
     width: 100%; padding: 14px; font-size: 17px; font-family: inherit;
@@ -114,7 +123,7 @@
     border: none; border-radius: 10px; background: var(--gold); color: #1a1200; cursor: pointer;
   }
   .count { font-size: 96px; font-weight: 800; color: var(--gold); line-height: 1; }
-  .warn { color: var(--ng); font-size: 13px; text-align: center; margin-top: 12px; }
+  .warn { flex: 0 0 auto; color: var(--ng); font-size: 13px; text-align: center; }
 </style>
 </head>
 <body>
@@ -223,14 +232,14 @@
       }
       html += '</div>';
     } else {
-      html += '<div class="ablock"><div class="badge">A</div><div class="choices">';
+      html += '<div class="choices">';
       for (var j = 1; j <= 4; j++) {
         html += '<button class="choice ' + choiceClass(j, opts) + '" ' + choiceAttr(j, opts) + '>'
           + '<span class="num">' + j + '</span><span>' + esc(q.choices[j - 1]) + '</span>'
           + markHtml(j, opts)
           + '</button>';
       }
-      html += '</div></div>';
+      html += '</div>';
     }
     return html;
   }
@@ -298,14 +307,16 @@
         break;
 
       case 'question':
-        html = bannerHtml(v)
+        html = '<div class="screen">'
+          + bannerHtml(v)
           + questionHtml(v.q, {
               selectable: v.mode === 'open',
               mine: v.mine,
               correct: v.mode === 'result' ? v.correct : 0,
             })
           + (v.mode === 'result' ? '' : timerHtml())
-          + (st.sendFailed ? '<div class="warn">送信に失敗しました。司会者に申し出てください</div>' : '');
+          + (st.sendFailed ? '<div class="warn">送信に失敗しました。司会者に申し出てください</div>' : '')
+          + '</div>';
         break;
     }
 
