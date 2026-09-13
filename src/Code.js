@@ -14,6 +14,7 @@ const SHEET = {
   ANSWERS: '回答',
   STATE: '状態',
   RESULT_BY_QUESTION: '問題別結果',
+  RESULT_FINAL: '最終結果',
 };
 
 const PROP_STATE = 'state';
@@ -290,6 +291,7 @@ function setupSheets() {
   ensureSheet_(ss, SHEET.ANSWERS, HEADER.ANSWERS);
   ensureSheet_(ss, SHEET.STATE, HEADER.STATE);
   setupResultByQuestionSheet_(ss);
+  setupFinalResultSheet_(ss);
   seedSampleQuestions_();
 
   // 新規スプレッドシート作成時の空シートを片付ける
@@ -334,6 +336,33 @@ function setupResultByQuestionSheet_(ss) {
   sh.getRange('B1').setDataValidation(rule);
 
   sh.setFrozenRows(4);
+  return sh;
+}
+
+/**
+ * 最終結果シートを組み立てる。
+ * 正解数の多い順に並べ、同数なら正解した問題の合計タイムが短い方を上位とする。
+ * 時間外の回答は正解数・タイムのどちらからも除外し、問題別結果シートと条件を揃える。
+ * 名前は参加者シートから取るため、1問も答えなかった人も0正解として最下位に並ぶ。
+ */
+function setupFinalResultSheet_(ss) {
+  const sh = ss.getSheetByName(SHEET.RESULT_FINAL) || ss.insertSheet(SHEET.RESULT_FINAL);
+
+  sh.getRange('A1:E1')
+    .setValues([['順位', '名前', '正解数', '合計タイムms', '合計タイム(秒)']])
+    .setFontWeight('bold');
+
+  sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(LEN($B$2:$B),ROW($B$2:$B)-1,""))');
+  sh.getRange('B2').setFormula(
+    "=IFERROR(LET(" +
+    "names,UNIQUE(FILTER('参加者'!$B$2:$B,'参加者'!$B$2:$B<>\"\"))," +
+    "correct,ARRAYFORMULA(COUNTIFS('回答'!$C$2:$C,names,'回答'!$F$2:$F,1,'回答'!$G$2:$G,0))," +
+    "total,ARRAYFORMULA(SUMIFS('回答'!$E$2:$E,'回答'!$C$2:$C,names,'回答'!$F$2:$F,1,'回答'!$G$2:$G,0))," +
+    "SORT({names,correct,total},2,FALSE,3,TRUE)),\"\")"
+  );
+  sh.getRange('E2').setFormula('=ARRAYFORMULA(IF(LEN($D$2:$D),$D$2:$D/1000,""))');
+
+  sh.setFrozenRows(1);
   return sh;
 }
 
