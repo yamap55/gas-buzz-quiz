@@ -13,6 +13,7 @@ const SHEET = {
   PARTICIPANTS: '参加者',
   ANSWERS: '回答',
   STATE: '状態',
+  RESULT_BY_QUESTION: '問題別結果',
 };
 
 const PROP_STATE = 'state';
@@ -288,6 +289,7 @@ function setupSheets() {
   ensureSheet_(ss, SHEET.PARTICIPANTS, HEADER.PARTICIPANTS);
   ensureSheet_(ss, SHEET.ANSWERS, HEADER.ANSWERS);
   ensureSheet_(ss, SHEET.STATE, HEADER.STATE);
+  setupResultByQuestionSheet_(ss);
   seedSampleQuestions_();
 
   // 新規スプレッドシート作成時の空シートを片付ける
@@ -301,6 +303,37 @@ function ensureSheet_(ss, name, header) {
   const sh = ss.getSheetByName(name) || ss.insertSheet(name);
   sh.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold');
   sh.setFrozenRows(1);
+  return sh;
+}
+
+/**
+ * 問題別結果シートを組み立てる。
+ * 集計はすべてシートの関数で行い、回答シートは生データとして触らない。
+ * 中身は生成物なので、実行のたびに全体を書き直して問題ない。
+ */
+function setupResultByQuestionSheet_(ss) {
+  const sh = ss.getSheetByName(SHEET.RESULT_BY_QUESTION) || ss.insertSheet(SHEET.RESULT_BY_QUESTION);
+
+  sh.getRange('A1:A2').setValues([['問題ID'], ['問題文']]).setFontWeight('bold');
+  sh.getRange('B2').setFormula("=IFERROR(VLOOKUP($B$1,'問題'!$A:$B,2,FALSE),\"\")");
+
+  sh.getRange('A4:D4').setValues([['順位', '名前', '回答タイムms', 'タイム(秒)']]).setFontWeight('bold');
+  sh.getRange('A5').setFormula('=ARRAYFORMULA(IF(LEN($B$5:$B),ROW($B$5:$B)-4,""))');
+  // 正解かつ時間内の回答だけを、回答タイムの昇順で並べる
+  sh.getRange('B5').setFormula(
+    "=IFERROR(SORT(FILTER({'回答'!$C$2:$C,'回答'!$E$2:$E}," +
+    "'回答'!$B$2:$B=$B$1,'回答'!$F$2:$F=1,'回答'!$G$2:$G=0),2,TRUE),\"\")"
+  );
+  sh.getRange('D5').setFormula('=ARRAYFORMULA(IF(LEN($C$5:$C),$C$5:$C/1000,""))');
+
+  // 問題IDは問題シートから選ぶ
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(ss.getSheetByName(SHEET.QUESTIONS).getRange('A2:A1000'), true)
+    .setAllowInvalid(false)
+    .build();
+  sh.getRange('B1').setDataValidation(rule);
+
+  sh.setFrozenRows(4);
   return sh;
 }
 
