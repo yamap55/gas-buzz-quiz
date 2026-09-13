@@ -21,14 +21,15 @@ const PROP_STATE = 'state';
 const REVEAL_DELAY_MS = 8000;
 
 const HEADER = {
-  QUESTIONS: ['ID', '問題文', '種別', '選択肢1', '選択肢2', '選択肢3', '選択肢4', '正解', '制限時間(秒)', '最終出題時刻'],
+  QUESTIONS: ['ID', '問題文', '備考', '種別', '選択肢1', '選択肢2', '選択肢3', '選択肢4', '正解', '制限時間(秒)', '最終出題時刻'],
   PARTICIPANTS: ['登録時刻', '名前'],
-  ANSWERS: ['記録時刻', '問題ID', '名前', '回答', '経過時間ms', '正誤', '時間外', '経過時間ms(サーバー)'],
+  ANSWERS: ['記録時刻', '問題ID', '名前', '回答', '回答タイムms', '正誤', '時間外', 'サーバー計測ms(参考)'],
   STATE: ['項目', '値'],
 };
 
 // 問題シートの列番号（1始まり）
-const COL_LAST_STARTED_AT = 10;
+const COL_QUESTION_TYPE = 4;
+const COL_LAST_STARTED_AT = 11;
 
 /* ========== エントリポイント ========== */
 
@@ -153,7 +154,7 @@ function adminGetDashboard() {
   return {
     state: state, // 管理画面には正解も渡す
     serverNow: Date.now(),
-    questions: loadQuestions_().map(toClientQuestion_),
+    questions: loadQuestions_().map(toAdminQuestion_),
     participantCount: Math.max(0, sheet_(SHEET.PARTICIPANTS).getLastRow() - 1),
     answerCount: state.question ? countAnswers_(state.question.id) : 0,
   };
@@ -232,17 +233,19 @@ function loadQuestions_() {
 
   return sh.getRange(2, 1, last - 1, HEADER.QUESTIONS.length).getValues()
     .map(function (row, i) {
-      const type = String(row[2]).trim().toLowerCase() === 'image' ? 'image' : 'text';
-      const choices = [row[3], row[4], row[5], row[6]].map(String);
+      const type = String(row[3]).trim().toLowerCase() === 'image' ? 'image' : 'text';
+      const choices = [row[4], row[5], row[6], row[7]].map(String);
       return {
         rowIndex: i + 2,
         id: String(row[0]).trim(),
         text: String(row[1]),
+        // 参加者には渡さず、管理画面にだけ表示する（正解の解説を書く想定のため）
+        note: String(row[2]),
         type: type,
         // 画像の選択肢だけ配列になる（1つの選択肢に複数枚を指定できるため）
         choices: type === 'image' ? choices.map(splitImageUrls_) : choices,
-        correct: Number(row[7]),
-        limitSec: Number(row[8]) || 20,
+        correct: Number(row[8]),
+        limitSec: Number(row[9]) || 20,
       };
     })
     .filter(function (q) { return q.id; });
@@ -265,16 +268,23 @@ function findQuestion_(questionId) {
   return matched.length ? matched[0] : null;
 }
 
-/** シート由来の行オブジェクトから、画面に渡す形へ変換する（rowIndex と correct を落とす） */
+/** シート由来の行オブジェクトから、参加者画面に渡す形へ変換する（rowIndex・correct・note を落とす） */
 function toClientQuestion_(q) {
   return { id: q.id, text: q.text, type: q.type, choices: q.choices, limitSec: q.limitSec };
+}
+
+/** 管理画面に渡す形。備考を含める */
+function toAdminQuestion_(q) {
+  const question = toClientQuestion_(q);
+  question.note = q.note;
+  return question;
 }
 
 /* ========== 初期セットアップ ========== */
 
 function setupSheets() {
   const ss = book_();
-  ensureSheet_(ss, SHEET.QUESTIONS, HEADER.QUESTIONS);
+  applyQuestionTypeValidation_(ensureSheet_(ss, SHEET.QUESTIONS, HEADER.QUESTIONS));
   ensureSheet_(ss, SHEET.PARTICIPANTS, HEADER.PARTICIPANTS);
   ensureSheet_(ss, SHEET.ANSWERS, HEADER.ANSWERS);
   ensureSheet_(ss, SHEET.STATE, HEADER.STATE);
@@ -294,16 +304,28 @@ function ensureSheet_(ss, name, header) {
   return sh;
 }
 
+/** 種別をプルダウンにする。typoしても text にフォールバックしてしまい、気づきにくいため */
+function applyQuestionTypeValidation_(sh) {
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['text', 'image'], true)
+    .setAllowInvalid(false)
+    .build();
+  sh.getRange(2, COL_QUESTION_TYPE, 999, 1).setDataValidation(rule);
+}
+
 function seedSampleQuestions_() {
   const sh = sheet_(SHEET.QUESTIONS);
   if (sh.getLastRow() > 1) return; // 既に問題があれば触らない
 
   const rows = [
-    ['q01', 'ミュンヘンのオクトーバーフェストが初めて開催された年は？', 'text',
+    ['q01', 'ミュンヘンのオクトーバーフェストが初めて開催された年は？',
+      'バイエルン王太子ルートヴィヒとテレーゼの結婚を祝う祭りが起源', 'text',
       '1810年', '1850年', '1900年', '1946年', 1, 20, ''],
-    ['q02', 'オクトーバーフェストの会場となっている広場の名前は？', 'text',
+    ['q02', 'オクトーバーフェストの会場となっている広場の名前は？',
+      '王太子妃テレーゼの名前に由来する', 'text',
       'マリエンプラッツ', 'テレージエンヴィーゼ', 'オデオンスプラッツ', 'カールスプラッツ', 2, 20, ''],
-    ['q03', 'オクトーバーフェストで提供されるビールジョッキ「マース」の容量は？', 'text',
+    ['q03', 'オクトーバーフェストで提供されるビールジョッキ「マース」の容量は？',
+      '', 'text',
       '0.5リットル', '0.75リットル', '1リットル', '1.5リットル', 3, 20, ''],
   ];
   sh.getRange(2, 1, rows.length, HEADER.QUESTIONS.length).setValues(rows);

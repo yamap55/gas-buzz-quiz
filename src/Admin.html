@@ -27,6 +27,8 @@
   .stat .value { font-size: 22px; font-weight: 700; }
   .value.gold { color: var(--gold); }
   .qnow { font-size: 15px; color: var(--muted); margin-bottom: 12px; }
+  /* 正解発表のときに司会が読み上げる補足。問題シートの備考列 */
+  .note { font-size: 14px; line-height: 1.6; background: var(--panel-2); border-left: 3px solid var(--gold); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; white-space: pre-wrap; }
   .error { color: var(--ng); font-size: 13px; margin-bottom: 12px; }
 
   .actions { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -64,6 +66,7 @@
       <div class="stat"><div class="label">タイマー</div><div class="value" id="v-timer">-</div></div>
     </div>
     <div class="qnow" id="v-question">読み込み中...</div>
+    <div class="note" id="v-note" hidden></div>
     <div class="error" id="v-error"></div>
     <div class="actions">
       <button class="btn-gold" id="btn-reveal" disabled>正解発表</button>
@@ -119,10 +122,20 @@
     setText('v-timer', timerText(s, q));
     setText('v-question', q ? q.id + ' : ' + q.text : '問題は選択されていません');
 
+    var note = q ? noteOf(d, q.id) : '';
+    var noteEl = document.getElementById('v-note');
+    setText('v-note', note);
+    noteEl.hidden = !note;
+
     document.getElementById('btn-reveal').disabled = st.busy || !q || s.phase !== 'question';
     document.getElementById('btn-waiting').disabled = st.busy;
 
     renderTable(d);
+  }
+
+  function noteOf(d, questionId) {
+    var matched = d.questions.filter(function (q) { return q.id === questionId; });
+    return matched.length ? (matched[0].note || '') : '';
   }
 
   function timerText(s, q) {
