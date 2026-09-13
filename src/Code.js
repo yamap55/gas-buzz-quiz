@@ -344,6 +344,11 @@ function setupResultByQuestionSheet_(ss) {
  * 正解数の多い順に並べ、同数なら正解した問題の合計タイムが短い方を上位とする。
  * 時間外の回答は正解数・タイムのどちらからも除外し、問題別結果シートと条件を揃える。
  * 名前は参加者シートから取るため、1問も答えなかった人も0正解として最下位に並ぶ。
+ *
+ * 集計はG〜K列の作業用セルに一度出してから並べ替える。
+ * 検索条件に計算結果の配列を渡すと展開されないため、条件には実際のセル範囲を渡す。
+ * 合計タイムは SUMIFS が展開されず0になったため、回答1行ごとの有効タイムを
+ * K列に出したうえで SUMIF で合計している。
  */
 function setupFinalResultSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.RESULT_FINAL) || ss.insertSheet(SHEET.RESULT_FINAL);
@@ -351,14 +356,38 @@ function setupFinalResultSheet_(ss) {
   sh.getRange('A1:E1')
     .setValues([['順位', '名前', '正解数', '合計タイムms', '合計タイム(秒)']])
     .setFontWeight('bold');
+  sh.getRange('G1:K1')
+    .setValues([[
+      '作業用: 名前', '作業用: 正解数', '作業用: 合計タイムms',
+      '作業用: 回答の名前', '作業用: 有効タイムms',
+    ]])
+    .setFontWeight('bold');
+
+  // 参加者の一覧
+  sh.getRange('G2').setFormula(
+    "=IFERROR(UNIQUE(FILTER('参加者'!$B$2:$B,'参加者'!$B$2:$B<>\"\")),\"\")"
+  );
+  sh.getRange('H2').setFormula(
+    "=ARRAYFORMULA(IF(LEN($G$2:$G$200)," +
+    "COUNTIFS('回答'!$C$2:$C,$G$2:$G$200,'回答'!$F$2:$F,1,'回答'!$G$2:$G,0),\"\"))"
+  );
+  sh.getRange('I2').setFormula(
+    "=ARRAYFORMULA(IF(LEN($G$2:$G$200),SUMIF($J$2:$J,$G$2:$G$200,$K$2:$K),\"\"))"
+  );
+
+  // 回答1行ごとの値。正解かつ時間内のときだけタイムが入る
+  sh.getRange('J2').setFormula(
+    "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C),'回答'!$C$2:$C,\"\"))"
+  );
+  sh.getRange('K2').setFormula(
+    "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C)," +
+    "'回答'!$E$2:$E*('回答'!$F$2:$F=1)*('回答'!$G$2:$G=0),\"\"))"
+  );
 
   sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(LEN($B$2:$B),ROW($B$2:$B)-1,""))');
   sh.getRange('B2').setFormula(
-    "=IFERROR(LET(" +
-    "names,UNIQUE(FILTER('参加者'!$B$2:$B,'参加者'!$B$2:$B<>\"\"))," +
-    "correct,ARRAYFORMULA(COUNTIFS('回答'!$C$2:$C,names,'回答'!$F$2:$F,1,'回答'!$G$2:$G,0))," +
-    "total,ARRAYFORMULA(SUMIFS('回答'!$E$2:$E,'回答'!$C$2:$C,names,'回答'!$F$2:$F,1,'回答'!$G$2:$G,0))," +
-    "SORT({names,correct,total},2,FALSE,3,TRUE)),\"\")"
+    "=IFERROR(SORT(FILTER({$G$2:$G$200,$H$2:$H$200,$I$2:$I$200}," +
+    "LEN($G$2:$G$200)),2,FALSE,3,TRUE),\"\")"
   );
   sh.getRange('E2').setFormula('=ARRAYFORMULA(IF(LEN($D$2:$D),$D$2:$D/1000,""))');
 
