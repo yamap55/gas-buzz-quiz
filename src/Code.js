@@ -343,9 +343,12 @@ function setupResultByQuestionSheet_(ss) {
  * 最終結果シートを組み立てる。
  * 正解数の多い順に並べ、同数なら正解した問題の合計タイムが短い方を上位とする。
  * 時間外の回答は正解数・タイムのどちらからも除外し、問題別結果シートと条件を揃える。
- * 名前は参加者シートから取るため、1問も答えなかった人も0正解として最下位に並ぶ。
  *
- * 集計はG〜K列の作業用セルに一度出してから並べ替える。
+ * 集計対象の名前は、参加者シートと回答シートの両方から集める。
+ * 参加者シートだけを見ると、名前が一致しない回答が黙って0正解に沈んで気づけない。
+ * 前後の空白は落としたうえで突き合わせる。
+ *
+ * 集計はG列より右の作業用セルに一度出してから並べ替える。
  * 検索条件に計算結果の配列を渡すと展開されないため、条件には実際のセル範囲を渡す。
  * 合計タイムは SUMIFS が展開されず0になったため、回答1行ごとの有効タイムを
  * K列に出したうえで SUMIF で合計している。
@@ -356,20 +359,21 @@ function setupFinalResultSheet_(ss) {
   sh.getRange('A1:E1')
     .setValues([['順位', '名前', '正解数', '合計タイムms', '合計タイム(秒)']])
     .setFontWeight('bold');
-  sh.getRange('G1:K1')
+  sh.getRange('G1:L1')
     .setValues([[
       '作業用: 名前', '作業用: 正解数', '作業用: 合計タイムms',
-      '作業用: 回答の名前', '作業用: 有効タイムms',
+      '作業用: 回答の名前', '作業用: 有効タイムms', '作業用: 参加者の名前',
     ]])
     .setFontWeight('bold');
 
-  // 参加者の一覧
+  // 参加者シートと回答シートの両方に出てくる名前を集める
   sh.getRange('G2').setFormula(
-    "=IFERROR(UNIQUE(FILTER('参加者'!$B$2:$B,'参加者'!$B$2:$B<>\"\")),\"\")"
+    "=IFERROR(UNIQUE(FILTER({$L$2:$L$500;$J$2:$J$2000}," +
+    "{$L$2:$L$500;$J$2:$J$2000}<>\"\")),\"\")"
   );
   sh.getRange('H2').setFormula(
     "=ARRAYFORMULA(IF(LEN($G$2:$G$200)," +
-    "COUNTIFS('回答'!$C$2:$C,$G$2:$G$200,'回答'!$F$2:$F,1,'回答'!$G$2:$G,0),\"\"))"
+    "COUNTIFS($J$2:$J,$G$2:$G$200,$K$2:$K,\">0\"),\"\"))"
   );
   sh.getRange('I2').setFormula(
     "=ARRAYFORMULA(IF(LEN($G$2:$G$200),SUMIF($J$2:$J,$G$2:$G$200,$K$2:$K),\"\"))"
@@ -377,11 +381,14 @@ function setupFinalResultSheet_(ss) {
 
   // 回答1行ごとの値。正解かつ時間内のときだけタイムが入る
   sh.getRange('J2').setFormula(
-    "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C),'回答'!$C$2:$C,\"\"))"
+    "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C),TRIM('回答'!$C$2:$C),\"\"))"
   );
   sh.getRange('K2').setFormula(
     "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C)," +
     "'回答'!$E$2:$E*('回答'!$F$2:$F=1)*('回答'!$G$2:$G=0),\"\"))"
+  );
+  sh.getRange('L2').setFormula(
+    "=ARRAYFORMULA(IF(LEN('参加者'!$B$2:$B),TRIM('参加者'!$B$2:$B),\"\"))"
   );
 
   sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(LEN($B$2:$B),ROW($B$2:$B)-1,""))');
