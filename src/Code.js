@@ -18,6 +18,7 @@ const SHEET = {
 };
 
 const PROP_STATE = 'state';
+const PROP_ANSWER_COUNTS = 'answerCounts';
 
 // 出題操作から一斉表示までの猶予。全端末がポーリングで startAt を受け取る時間を確保する
 const REVEAL_DELAY_MS = 8000;
@@ -64,12 +65,29 @@ function saveState_(state) {
  * 正解は発表フェーズになるまでクライアントへ渡さない。
  */
 function getState() {
-  const state = rawState_();
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const state = props[PROP_STATE] ? JSON.parse(props[PROP_STATE]) : defaultState_();
   if (state.phase !== 'answer') {
     state.correct = null;
   }
+  // 選択肢ごとの回答数は締切後だけ渡す。回答受付中は値そのものを配らない
+  state.counts = shouldRevealCounts_(state) ? readAnswerCounts_(props, state.question.id) : null;
   state.serverNow = Date.now();
   return state;
+}
+
+function shouldRevealCounts_(state) {
+  if (!state.question) return false;
+  if (state.phase === 'answer') return true;
+  if (state.phase !== 'question') return false;
+  return Date.now() > state.startAt + state.question.limitSec * 1000;
+}
+
+function readAnswerCounts_(props, questionId) {
+  const raw = props[PROP_ANSWER_COUNTS];
+  if (!raw) return null;
+  const stored = JSON.parse(raw);
+  return stored.questionId === questionId ? stored.counts : null;
 }
 
 /** 人間が読む・手で直すための状態ミラーをシートに書く */
@@ -127,6 +145,7 @@ function adminStartQuestion(questionId) {
     correct: q.correct,
   };
   saveState_(state);
+  resetAnswerCounts_(q.id);
 
   // 記録用に出題時刻を残す
   sheet_(SHEET.QUESTIONS).getRange(q.rowIndex, COL_LAST_STARTED_AT).setValue(new Date());
@@ -218,12 +237,39 @@ function submitAnswer(payload) {
       isLate ? 1 : 0,
       Math.round(serverElapsedMs),
     ]);
+    incrementAnswerCount_(question.id, choice);
   } finally {
     lock.releaseLock();
   }
 
   // 正誤は返さない（発表前に正解が漏れるため）
   return { ok: true };
+}
+
+/* ========== 選択肢ごとの回答数 ========== */
+
+/**
+ * 回答数はシートを数え直さず、カウンタとして積む。
+ * ポーリングで呼ばれる getState からスプレッドシートを読まないようにするため。
+ * 呼び出し元の submitAnswer が LockService で直列化しているので、加算は競合しない。
+ */
+function incrementAnswerCount_(questionId, choice) {
+  if (choice < 1 || choice > 4) return;
+
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PROP_ANSWER_COUNTS);
+  if (!raw) return;
+
+  const stored = JSON.parse(raw);
+  if (stored.questionId !== questionId) return;
+
+  stored.counts[choice - 1] += 1;
+  props.setProperty(PROP_ANSWER_COUNTS, JSON.stringify(stored));
+}
+
+function resetAnswerCounts_(questionId) {
+  PropertiesService.getScriptProperties()
+    .setProperty(PROP_ANSWER_COUNTS, JSON.stringify({ questionId: questionId, counts: [0, 0, 0, 0] }));
 }
 
 /* ========== 問題の読み込み ========== */
