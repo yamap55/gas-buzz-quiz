@@ -127,6 +127,7 @@ function restoreStateFromSheet() {
     if (q) {
       state.question = toClientQuestion_(q);
       state.correct = q.correct;
+      ensureAnswerCounts_(q.id);
     }
   }
   saveState_(state);
@@ -174,6 +175,7 @@ function adminSetWaiting() {
 
 /** 管理画面のポーリング用。参加者画面と違いスプレッドシートを読むが、接続は管理者1台だけ */
 function adminGetDashboard() {
+  // 状態と回答数を1回の読み出しでまとめて取るため、rawState_ は経由しない
   const props = PropertiesService.getScriptProperties().getProperties();
   const state = parseState_(props[PROP_STATE]);
   return {
@@ -267,6 +269,19 @@ function totalAnswerCount_(props, questionId) {
   const counts = readAnswerCounts_(props, questionId);
   if (!counts) return 0;
   return counts.reduce(function (sum, count) { return sum + count; }, 0);
+}
+
+/**
+ * 回答を積める状態にする。
+ * カウンタが無いまま回答が来ると incrementAnswerCount_ が何もせず、
+ * 管理画面の回答数も参加者画面の選択肢別回答数も出なくなる。
+ * 同じ問題のカウンタが既にあるときは、積んだ数を失わないよう温存する。
+ */
+function ensureAnswerCounts_(questionId) {
+  const raw = PropertiesService.getScriptProperties().getProperty(PROP_ANSWER_COUNTS);
+  const stored = raw ? JSON.parse(raw) : null;
+  if (stored && stored.questionId === questionId) return;
+  resetAnswerCounts_(questionId);
 }
 
 function resetAnswerCounts_(questionId) {
