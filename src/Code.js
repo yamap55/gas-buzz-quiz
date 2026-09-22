@@ -50,9 +50,12 @@ function defaultState_() {
   return { rev: 0, phase: 'waiting', startAt: 0, question: null, correct: null };
 }
 
-function rawState_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(PROP_STATE);
+function parseState_(raw) {
   return raw ? JSON.parse(raw) : defaultState_();
+}
+
+function rawState_() {
+  return parseState_(PropertiesService.getScriptProperties().getProperty(PROP_STATE));
 }
 
 function saveState_(state) {
@@ -66,7 +69,7 @@ function saveState_(state) {
  */
 function getState() {
   const props = PropertiesService.getScriptProperties().getProperties();
-  const state = props[PROP_STATE] ? JSON.parse(props[PROP_STATE]) : defaultState_();
+  const state = parseState_(props[PROP_STATE]);
   if (state.phase !== 'answer') {
     state.correct = null;
   }
@@ -124,6 +127,7 @@ function restoreStateFromSheet() {
     if (q) {
       state.question = toClientQuestion_(q);
       state.correct = q.correct;
+      ensureAnswerCounts_(q.id);
     }
   }
   saveState_(state);
@@ -171,23 +175,16 @@ function adminSetWaiting() {
 
 /** 管理画面のポーリング用。参加者画面と違いスプレッドシートを読むが、接続は管理者1台だけ */
 function adminGetDashboard() {
-  const state = rawState_();
+  // 状態と回答数を1回の読み出しでまとめて取るため、rawState_ は経由しない
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const state = parseState_(props[PROP_STATE]);
   return {
     state: state, // 管理画面には正解も渡す
     serverNow: Date.now(),
     questions: loadQuestions_().map(toAdminQuestion_),
     participantCount: Math.max(0, sheet_(SHEET.PARTICIPANTS).getLastRow() - 1),
-    answerCount: state.question ? countAnswers_(state.question.id) : 0,
+    answerCount: state.question ? totalAnswerCount_(props, state.question.id) : 0,
   };
-}
-
-function countAnswers_(questionId) {
-  const sh = sheet_(SHEET.ANSWERS);
-  const last = sh.getLastRow();
-  if (last < 2) return 0;
-  return sh.getRange(2, 2, last - 1, 1).getValues().filter(function (row) {
-    return row[0] === questionId;
-  }).length;
 }
 
 /* ========== 参加者画面から呼ばれる操作 ========== */
@@ -265,6 +262,26 @@ function incrementAnswerCount_(questionId, choice) {
 
   stored.counts[choice - 1] += 1;
   props.setProperty(PROP_ANSWER_COUNTS, JSON.stringify(stored));
+}
+
+/** 出題中の問題に集まった回答数。選択肢ごとのカウンタの合計で足りる */
+function totalAnswerCount_(props, questionId) {
+  const counts = readAnswerCounts_(props, questionId);
+  if (!counts) return 0;
+  return counts.reduce(function (sum, count) { return sum + count; }, 0);
+}
+
+/**
+ * 回答を積める状態にする。
+ * カウンタが無いまま回答が来ると incrementAnswerCount_ が何もせず、
+ * 管理画面の回答数も参加者画面の選択肢別回答数も出なくなる。
+ * 同じ問題のカウンタが既にあるときは、積んだ数を失わないよう温存する。
+ */
+function ensureAnswerCounts_(questionId) {
+  const raw = PropertiesService.getScriptProperties().getProperty(PROP_ANSWER_COUNTS);
+  const stored = raw ? JSON.parse(raw) : null;
+  if (stored && stored.questionId === questionId) return;
+  resetAnswerCounts_(questionId);
 }
 
 function resetAnswerCounts_(questionId) {
