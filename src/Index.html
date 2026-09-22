@@ -2,28 +2,9 @@
 <html lang="ja">
 <head>
 <base target="_top">
+<?!= include('Styles') ?>
 <style>
-  :root {
-    --bg: #10131a;
-    --panel: #1b2130;
-    --panel-2: #232b3d;
-    --gold: #f5c451;
-    --gold-dim: #8a6d24;
-    --text: #f2f4f8;
-    --muted: #9aa4b8;
-    --ok: #4ade80;
-    --ok-ink: #04260f;
-    --ng: #f87171;
-    --ng-bg: #4a1d1d;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
-  }
 
   /* 画面全体を縦に使い切る。スマホのアドレスバーを考慮して dvh を優先する */
   #app {
@@ -149,15 +130,13 @@
 <body>
 <div id="app"></div>
 
+<?!= include('Sync') ?>
 <script>
-  var POLL_INTERVAL_MS = 2500;
   var TICK_INTERVAL_MS = 100;
 
   var st = {
     name: '',
     state: null,
-    offset: 0,        // サーバー時刻 - ローカル時刻
-    bestRtt: Infinity,
     lastKey: '',
     sendFailed: false,
   };
@@ -173,27 +152,6 @@
   function myAnswer(s) {
     var v = ls(answerKey(s));
     return v ? Number(v) : 0;
-  }
-
-  /* ---- 時刻同期 ---- */
-
-  // 往復時間が最小だったサンプルのオフセットを採用する
-  function now() { return Date.now() + st.offset; }
-
-  function poll() {
-    var t0 = Date.now();
-    google.script.run
-      .withSuccessHandler(function (s) {
-        var t1 = Date.now();
-        var rtt = t1 - t0;
-        if (rtt < st.bestRtt) {
-          st.bestRtt = rtt;
-          st.offset = s.serverNow - (t0 + t1) / 2;
-        }
-        st.state = s;
-      })
-      .withFailureHandler(function () { /* 次のポーリングで回復するので何もしない */ })
-      .getState();
   }
 
   /* ---- 画面の決定 ---- */
@@ -469,8 +427,8 @@
 
   st.name = ls('quiz.name') || '';
   render(true);
-  poll();
-  setInterval(poll, POLL_INTERVAL_MS);
+  // 通信に失敗しても次のポーリングで回復するため、失敗時は何もしない
+  startPolling('getState', function (state) { st.state = state; });
   setInterval(function () { render(false); }, TICK_INTERVAL_MS);
 </script>
 </body>
