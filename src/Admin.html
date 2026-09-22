@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <base target="_top">
-<?!= include('Styles') ?>
+<?!= include_('Styles') ?>
 <style>
   body { padding: 16px; }
   .wrap { max-width: 900px; margin: 0 auto; }
@@ -64,7 +64,7 @@
   <div id="questions"></div>
 </div>
 
-<?!= include('Sync') ?>
+<?!= include_('Sync') ?>
 <script>
   var TICK_INTERVAL_MS = 100;
   var PHASE_LABEL = { waiting: '待機中', question: '出題中', answer: '正解発表中' };

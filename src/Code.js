@@ -44,8 +44,11 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-/** 画面ファイルが共通部分を取り込むために呼ぶ */
-function include(filename) {
+/**
+ * 画面ファイルが共通部分を取り込むために呼ぶ。
+ * テンプレートはサーバー側で評価されるため、private な関数でも呼べる。
+ */
+function include_(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 

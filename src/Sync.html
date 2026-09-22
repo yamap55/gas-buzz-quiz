@@ -13,6 +13,9 @@
 
   // 往復時間が最小だったサンプルのオフセットを採用する。短い往復ほどズレが小さい
   function syncClock(sentAt, serverNow) {
+    // serverNow を返さない関数に使うと offset が NaN になり、以後どのサンプルでも回復しない
+    if (typeof serverNow !== 'number') return;
+
     var receivedAt = Date.now();
     var rtt = receivedAt - sentAt;
     if (rtt >= clock.bestRtt) return;
