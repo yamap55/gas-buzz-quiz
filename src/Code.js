@@ -30,9 +30,15 @@ const HEADER = {
   STATE: ['項目', '値'],
 };
 
-// 問題シートの列番号（1始まり）
-const COL_QUESTION_TYPE = 4;
-const COL_LAST_STARTED_AT = 11;
+// 状態シートに書き出す項目名。書き出しと復旧の両方から参照する
+const STATE_LABEL = {
+  REV: 'rev',
+  PHASE: 'phase',
+  QUESTION_ID: '問題ID',
+  START_AT: 'startAt(epoch ms)',
+  START_AT_TEXT: 'startAt(表示用)',
+  UPDATED_AT: '更新時刻',
+};
 
 /* ========== エントリポイント ========== */
 
@@ -106,12 +112,12 @@ function writeStateMirror_(state) {
   const sh = book_().getSheetByName(SHEET.STATE);
   if (!sh) return; // setupSheets 実行前は何もしない
   const rows = [
-    ['rev', state.rev],
-    ['phase', state.phase],
-    ['問題ID', state.question ? state.question.id : ''],
-    ['startAt(epoch ms)', state.startAt || ''],
-    ['startAt(表示用)', state.startAt ? formatTime_(new Date(state.startAt)) : ''],
-    ['更新時刻', formatTime_(new Date())],
+    [STATE_LABEL.REV, state.rev],
+    [STATE_LABEL.PHASE, state.phase],
+    [STATE_LABEL.QUESTION_ID, state.question ? state.question.id : ''],
+    [STATE_LABEL.START_AT, state.startAt || ''],
+    [STATE_LABEL.START_AT_TEXT, state.startAt ? formatTime_(new Date(state.startAt)) : ''],
+    [STATE_LABEL.UPDATED_AT, formatTime_(new Date())],
   ];
   sh.getRange(2, 1, rows.length, 2).setValues(rows);
 }
@@ -120,16 +126,17 @@ function writeStateMirror_(state) {
 function restoreStateFromSheet() {
   const sh = sheet_(SHEET.STATE);
   const map = {};
-  sh.getRange(2, 1, 6, 2).getValues().forEach(function (row) {
+  const labelCount = Object.keys(STATE_LABEL).length;
+  sh.getRange(2, 1, labelCount, 2).getValues().forEach(function (row) {
     map[row[0]] = row[1];
   });
 
   const state = defaultState_();
-  state.rev = Number(map['rev'] || 0) + 1;
-  state.phase = String(map['phase'] || 'waiting');
-  state.startAt = Number(map['startAt(epoch ms)'] || 0);
+  state.rev = Number(map[STATE_LABEL.REV] || 0) + 1;
+  state.phase = String(map[STATE_LABEL.PHASE] || 'waiting');
+  state.startAt = Number(map[STATE_LABEL.START_AT] || 0);
 
-  const questionId = String(map['問題ID'] || '').trim();
+  const questionId = String(map[STATE_LABEL.QUESTION_ID] || '').trim();
   if (questionId) {
     const q = findQuestion_(questionId);
     if (q) {
@@ -160,7 +167,9 @@ function adminStartQuestion(questionId) {
   resetAnswerCounts_(q.id);
 
   // 記録用に出題時刻を残す
-  sheet_(SHEET.QUESTIONS).getRange(q.rowIndex, COL_LAST_STARTED_AT).setValue(new Date());
+  sheet_(SHEET.QUESTIONS)
+    .getRange(q.rowIndex, columnNumber_(HEADER.QUESTIONS, '最終出題時刻'))
+    .setValue(new Date());
   return adminGetDashboard();
 }
 
@@ -204,7 +213,10 @@ function registerParticipant(name) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    sheet_(SHEET.PARTICIPANTS).appendRow([new Date(), trimmed]);
+    sheet_(SHEET.PARTICIPANTS).appendRow(toRow_(HEADER.PARTICIPANTS, {
+      '登録時刻': new Date(),
+      '名前': trimmed,
+    }));
   } finally {
     lock.releaseLock();
   }
@@ -232,16 +244,16 @@ function submitAnswer(payload) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    sheet_(SHEET.ANSWERS).appendRow([
-      new Date(),
-      question.id,
-      String(payload.name),
-      choice,
-      elapsedMs,
-      isCorrect ? 1 : 0,
-      isLate ? 1 : 0,
-      Math.round(serverElapsedMs),
-    ]);
+    sheet_(SHEET.ANSWERS).appendRow(toRow_(HEADER.ANSWERS, {
+      '記録時刻': new Date(),
+      '問題ID': question.id,
+      '名前': String(payload.name),
+      '回答': choice,
+      '回答タイムms': elapsedMs,
+      '正誤': isCorrect ? 1 : 0,
+      '時間外': isLate ? 1 : 0,
+      'サーバー計測ms(参考)': Math.round(serverElapsedMs),
+    }));
     incrementAnswerCount_(question.id, choice);
   } finally {
     lock.releaseLock();
@@ -306,19 +318,20 @@ function loadQuestions_() {
 
   return sh.getRange(2, 1, last - 1, HEADER.QUESTIONS.length).getValues()
     .map(function (row, i) {
-      const type = String(row[3]).trim().toLowerCase() === 'image' ? 'image' : 'text';
-      const choices = [row[4], row[5], row[6], row[7]].map(String);
+      const record = toRecord_(HEADER.QUESTIONS, row);
+      const type = String(record['種別']).trim().toLowerCase() === 'image' ? 'image' : 'text';
+      const choices = [1, 2, 3, 4].map(function (n) { return String(record['選択肢' + n]); });
       return {
         rowIndex: i + 2,
-        id: String(row[0]).trim(),
-        text: String(row[1]),
+        id: String(record['ID']).trim(),
+        text: String(record['問題文']),
         // 参加者には渡さず、管理画面にだけ表示する（正解の解説を書く想定のため）
-        note: String(row[2]),
+        note: String(record['備考']),
         type: type,
         // 画像の選択肢だけ配列になる（1つの選択肢に複数枚を指定できるため）
         choices: type === 'image' ? choices.map(splitImageUrls_) : choices,
-        correct: Number(row[8]),
-        limitSec: Number(row[9]) || 20,
+        correct: Number(record['正解']),
+        limitSec: Number(record['制限時間(秒)']) || 20,
       };
     })
     .filter(function (q) { return q.id; });
@@ -387,21 +400,38 @@ function ensureSheet_(ss, name, header) {
 function setupResultByQuestionSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.RESULT_BY_QUESTION) || ss.insertSheet(SHEET.RESULT_BY_QUESTION);
 
+  const questionIdLetter = columnLetter_(HEADER.QUESTIONS, 'ID');
+  const questionTextLetter = columnLetter_(HEADER.QUESTIONS, '問題文');
+  // VLOOKUP は検索列が範囲の先頭である必要があるため、ID が問題文より左にある前提に依存する
+  const textOffset = columnNumber_(HEADER.QUESTIONS, '問題文') - columnNumber_(HEADER.QUESTIONS, 'ID') + 1;
+
+  const answerQuestionId = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '問題ID');
+  const answerName = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '名前');
+  const answerTime = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '回答タイムms');
+  const answerCorrect = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '正誤');
+  const answerLate = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '時間外');
+
   sh.getRange('A1:A2').setValues([['問題ID'], ['問題文']]).setFontWeight('bold');
-  sh.getRange('B2').setFormula("=IFERROR(VLOOKUP($B$1,'問題'!$A:$B,2,FALSE),\"\")");
+  sh.getRange('B2').setFormula(
+    "=IFERROR(VLOOKUP($B$1,'" + SHEET.QUESTIONS + "'!$" + questionIdLetter + ":$" + questionTextLetter +
+    "," + textOffset + ",FALSE),\"\")"
+  );
 
   sh.getRange('A4:D4').setValues([['順位', '名前', '回答タイムms', 'タイム(秒)']]).setFontWeight('bold');
   sh.getRange('A5').setFormula('=ARRAYFORMULA(IF(LEN($B$5:$B),ROW($B$5:$B)-4,""))');
   // 正解かつ時間内の回答だけを、回答タイムの昇順で並べる
   sh.getRange('B5').setFormula(
-    "=IFERROR(SORT(FILTER({'回答'!$C$2:$C,'回答'!$E$2:$E}," +
-    "'回答'!$B$2:$B=$B$1,'回答'!$F$2:$F=1,'回答'!$G$2:$G=0),2,TRUE),\"\")"
+    "=IFERROR(SORT(FILTER({" + answerName + "," + answerTime + "}," +
+    answerQuestionId + "=$B$1," + answerCorrect + "=1," + answerLate + "=0),2,TRUE),\"\")"
   );
   sh.getRange('D5').setFormula('=ARRAYFORMULA(IF(LEN($C$5:$C),$C$5:$C/1000,""))');
 
   // 問題IDは問題シートから選ぶ
   const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInRange(ss.getSheetByName(SHEET.QUESTIONS).getRange('A2:A1000'), true)
+    .requireValueInRange(
+      ss.getSheetByName(SHEET.QUESTIONS).getRange(questionIdLetter + '2:' + questionIdLetter + '1000'),
+      true
+    )
     .setAllowInvalid(false)
     .build();
   sh.getRange('B1').setDataValidation(rule);
@@ -426,6 +456,12 @@ function setupResultByQuestionSheet_(ss) {
  */
 function setupFinalResultSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.RESULT_FINAL) || ss.insertSheet(SHEET.RESULT_FINAL);
+
+  const answerName = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '名前');
+  const answerTime = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '回答タイムms');
+  const answerCorrect = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '正誤');
+  const answerLate = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '時間外');
+  const participantName = columnRef_(SHEET.PARTICIPANTS, HEADER.PARTICIPANTS, '名前');
 
   sh.getRange('A1:E1')
     .setValues([['順位', '名前', '正解数', '合計タイムms', '合計タイム(秒)']])
@@ -452,14 +488,14 @@ function setupFinalResultSheet_(ss) {
 
   // 回答1行ごとの値。正解かつ時間内のときだけタイムが入る
   sh.getRange('J2').setFormula(
-    "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C),TRIM('回答'!$C$2:$C),\"\"))"
+    "=ARRAYFORMULA(IF(LEN(" + answerName + "),TRIM(" + answerName + "),\"\"))"
   );
   sh.getRange('K2').setFormula(
-    "=ARRAYFORMULA(IF(LEN('回答'!$C$2:$C)," +
-    "'回答'!$E$2:$E*('回答'!$F$2:$F=1)*('回答'!$G$2:$G=0),\"\"))"
+    "=ARRAYFORMULA(IF(LEN(" + answerName + ")," +
+    answerTime + "*(" + answerCorrect + "=1)*(" + answerLate + "=0),\"\"))"
   );
   sh.getRange('L2').setFormula(
-    "=ARRAYFORMULA(IF(LEN('参加者'!$B$2:$B),TRIM('参加者'!$B$2:$B),\"\"))"
+    "=ARRAYFORMULA(IF(LEN(" + participantName + "),TRIM(" + participantName + "),\"\"))"
   );
 
   sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(LEN($B$2:$B),ROW($B$2:$B)-1,""))');
@@ -479,25 +515,89 @@ function applyQuestionTypeValidation_(sh) {
     .requireValueInList(['text', 'image'], true)
     .setAllowInvalid(false)
     .build();
-  sh.getRange(2, COL_QUESTION_TYPE, 999, 1).setDataValidation(rule);
+  sh.getRange(2, columnNumber_(HEADER.QUESTIONS, '種別'), 999, 1).setDataValidation(rule);
 }
 
 function seedSampleQuestions_() {
   const sh = sheet_(SHEET.QUESTIONS);
   if (sh.getLastRow() > 1) return; // 既に問題があれば触らない
 
-  const rows = [
-    ['q01', 'ミュンヘンのオクトーバーフェストが初めて開催された年は？',
-      'バイエルン王太子ルートヴィヒとテレーゼの結婚を祝う祭りが起源', 'text',
-      '1810年', '1850年', '1900年', '1946年', 1, 20, ''],
-    ['q02', 'オクトーバーフェストの会場となっている広場の名前は？',
-      '王太子妃テレーゼの名前に由来する', 'text',
-      'マリエンプラッツ', 'テレージエンヴィーゼ', 'オデオンスプラッツ', 'カールスプラッツ', 2, 20, ''],
-    ['q03', 'オクトーバーフェストで提供されるビールジョッキ「マース」の容量は？',
-      '', 'text',
-      '0.5リットル', '0.75リットル', '1リットル', '1.5リットル', 3, 20, ''],
+  const samples = [
+    {
+      'ID': 'q01',
+      '問題文': 'ミュンヘンのオクトーバーフェストが初めて開催された年は？',
+      '備考': 'バイエルン王太子ルートヴィヒとテレーゼの結婚を祝う祭りが起源',
+      '種別': 'text',
+      '選択肢1': '1810年', '選択肢2': '1850年', '選択肢3': '1900年', '選択肢4': '1946年',
+      '正解': 1, '制限時間(秒)': 20, '最終出題時刻': '',
+    },
+    {
+      'ID': 'q02',
+      '問題文': 'オクトーバーフェストの会場となっている広場の名前は？',
+      '備考': '王太子妃テレーゼの名前に由来する',
+      '種別': 'text',
+      '選択肢1': 'マリエンプラッツ', '選択肢2': 'テレージエンヴィーゼ',
+      '選択肢3': 'オデオンスプラッツ', '選択肢4': 'カールスプラッツ',
+      '正解': 2, '制限時間(秒)': 20, '最終出題時刻': '',
+    },
+    {
+      'ID': 'q03',
+      '問題文': 'オクトーバーフェストで提供されるビールジョッキ「マース」の容量は？',
+      '備考': '',
+      '種別': 'text',
+      '選択肢1': '0.5リットル', '選択肢2': '0.75リットル',
+      '選択肢3': '1リットル', '選択肢4': '1.5リットル',
+      '正解': 3, '制限時間(秒)': 20, '最終出題時刻': '',
+    },
   ];
+  const rows = samples.map(function (sample) { return toRow_(HEADER.QUESTIONS, sample); });
   sh.getRange(2, 1, rows.length, HEADER.QUESTIONS.length).setValues(rows);
+}
+
+/* ========== 列の対応づけ ==========
+ * 列の位置をコードに直接書かず、ヘッダ定義から求める。
+ * 列を足したり並べ替えたりしても、読み書きする側を直さずに済ませるため。
+ */
+
+/** 行の配列を項目名で引ける形にする */
+function toRecord_(header, row) {
+  const record = {};
+  header.forEach(function (label, index) { record[label] = row[index]; });
+  return record;
+}
+
+/**
+ * 項目名の順に値を並べた行を作る。appendRow に渡す順序をヘッダ定義に従わせる。
+ * 値の無い項目は例外にする。黙って空欄の行を書くと、列を足したときに
+ * 書き漏らしたことに気づけないため。
+ */
+function toRow_(header, values) {
+  return header.map(function (label) {
+    if (!Object.prototype.hasOwnProperty.call(values, label)) {
+      throw new Error('値が指定されていません: ' + label);
+    }
+    return values[label];
+  });
+}
+
+/** 項目名から列番号（1始まり）を求める */
+function columnNumber_(header, label) {
+  const index = header.indexOf(label);
+  if (index < 0) throw new Error('列が見つかりません: ' + label);
+  return index + 1;
+}
+
+/** 項目名から列記号を求める。列がZを超える想定はないため1文字だけ扱う */
+function columnLetter_(header, label) {
+  const number = columnNumber_(header, label);
+  if (number > 26) throw new Error('列記号に変換できません: ' + label);
+  return String.fromCharCode('A'.charCodeAt(0) + number - 1);
+}
+
+/** 集計シートの数式で使う、列全体への参照を作る（例: '回答'!$C$2:$C） */
+function columnRef_(sheetName, header, label) {
+  const letter = columnLetter_(header, label);
+  return "'" + sheetName + "'!$" + letter + "$2:$" + letter;
 }
 
 /* ========== 小物 ========== */
