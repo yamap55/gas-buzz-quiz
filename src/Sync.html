@@ -1,0 +1,42 @@
+<script>
+  /*
+   * 画面共通の通信まわり。
+   * サーバーとの時計のズレを補正したうえで、一定間隔でポーリングする。
+   */
+
+  var POLL_INTERVAL_MS = 2500;
+
+  var clock = { offset: 0, bestRtt: Infinity };
+
+  /** サーバー時刻の推定値。問題の表示や経過時間の判定にはこちらを使う */
+  function now() { return Date.now() + clock.offset; }
+
+  // 往復時間が最小だったサンプルのオフセットを採用する。短い往復ほどズレが小さい
+  function syncClock(sentAt, serverNow) {
+    // serverNow を返さない関数に使うと offset が NaN になり、以後どのサンプルでも回復しない
+    if (typeof serverNow !== 'number') return;
+
+    var receivedAt = Date.now();
+    var rtt = receivedAt - sentAt;
+    if (rtt >= clock.bestRtt) return;
+    clock.bestRtt = rtt;
+    clock.offset = serverNow - (sentAt + receivedAt) / 2;
+  }
+
+  /** サーバーの関数を一定間隔で呼ぶ。戻り値の serverNow で時計を合わせる */
+  function startPolling(functionName, onSuccess, onFailure) {
+    function poll() {
+      var sentAt = Date.now();
+      google.script.run
+        .withSuccessHandler(function (result) {
+          syncClock(sentAt, result.serverNow);
+          onSuccess(result);
+        })
+        .withFailureHandler(function (error) {
+          if (onFailure) onFailure(error);
+        })[functionName]();
+    }
+    poll();
+    setInterval(poll, POLL_INTERVAL_MS);
+  }
+</script>

@@ -39,9 +39,17 @@ const COL_LAST_STARTED_AT = 11;
 function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) || '';
   const file = page === 'admin' ? 'Admin' : 'Index';
-  return HtmlService.createHtmlOutputFromFile(file)
+  return HtmlService.createTemplateFromFile(file).evaluate()
     .setTitle('早押しクイズ大会')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * 画面ファイルが共通部分を取り込むために呼ぶ。
+ * テンプレートはサーバー側で評価されるため、private な関数でも呼べる。
+ */
+function include_(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
 /* ========== 状態管理 ========== */

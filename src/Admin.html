@@ -2,22 +2,9 @@
 <html lang="ja">
 <head>
 <base target="_top">
+<?!= include_('Styles') ?>
 <style>
-  :root {
-    --bg: #10131a;
-    --panel: #1b2130;
-    --panel-2: #232b3d;
-    --gold: #f5c451;
-    --text: #f2f4f8;
-    --muted: #9aa4b8;
-    --ng: #f87171;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 16px;
-    background: var(--bg); color: var(--text);
-    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
-  }
+  body { padding: 16px; }
   .wrap { max-width: 900px; margin: 0 auto; }
   h1 { font-size: 20px; margin: 0 0 16px; }
 
@@ -77,31 +64,12 @@
   <div id="questions"></div>
 </div>
 
+<?!= include_('Sync') ?>
 <script>
-  var POLL_INTERVAL_MS = 2500;
   var TICK_INTERVAL_MS = 100;
   var PHASE_LABEL = { waiting: '待機中', question: '出題中', answer: '正解発表中' };
 
-  var st = { data: null, offset: 0, bestRtt: Infinity, busy: false, tableKey: '' };
-
-  function now() { return Date.now() + st.offset; }
-
-  function poll() {
-    var t0 = Date.now();
-    google.script.run
-      .withSuccessHandler(function (d) {
-        var t1 = Date.now();
-        if (t1 - t0 < st.bestRtt) {
-          st.bestRtt = t1 - t0;
-          st.offset = d.serverNow - (t0 + t1) / 2;
-        }
-        st.data = d;
-        setText('v-error', '');
-        render();
-      })
-      .withFailureHandler(function (e) { setText('v-error', '通信エラー: ' + e.message); })
-      .adminGetDashboard();
-  }
+  var st = { data: null, busy: false, tableKey: '' };
 
   /* ---- 描画 ---- */
 
@@ -217,8 +185,15 @@
   document.getElementById('btn-reveal').addEventListener('click', function () { command('adminRevealAnswer'); });
   document.getElementById('btn-waiting').addEventListener('click', function () { command('adminSetWaiting'); });
 
-  poll();
-  setInterval(poll, POLL_INTERVAL_MS);
+  startPolling(
+    'adminGetDashboard',
+    function (dashboard) {
+      st.data = dashboard;
+      setText('v-error', '');
+      render();
+    },
+    function (error) { setText('v-error', '通信エラー: ' + error.message); }
+  );
   setInterval(render, TICK_INTERVAL_MS);
 </script>
 </body>
