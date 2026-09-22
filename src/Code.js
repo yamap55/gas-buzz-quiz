@@ -402,6 +402,7 @@ function setupResultByQuestionSheet_(ss) {
 
   const questionIdLetter = columnLetter_(HEADER.QUESTIONS, 'ID');
   const questionTextLetter = columnLetter_(HEADER.QUESTIONS, '問題文');
+  // VLOOKUP は検索列が範囲の先頭である必要があるため、ID が問題文より左にある前提に依存する
   const textOffset = columnNumber_(HEADER.QUESTIONS, '問題文') - columnNumber_(HEADER.QUESTIONS, 'ID') + 1;
 
   const answerQuestionId = columnRef_(SHEET.ANSWERS, HEADER.ANSWERS, '問題ID');
@@ -565,9 +566,18 @@ function toRecord_(header, row) {
   return record;
 }
 
-/** 項目名の順に値を並べた行を作る。appendRow に渡す順序をヘッダ定義に従わせる */
+/**
+ * 項目名の順に値を並べた行を作る。appendRow に渡す順序をヘッダ定義に従わせる。
+ * 値の無い項目は例外にする。黙って空欄の行を書くと、列を足したときに
+ * 書き漏らしたことに気づけないため。
+ */
 function toRow_(header, values) {
-  return header.map(function (label) { return values[label]; });
+  return header.map(function (label) {
+    if (!Object.prototype.hasOwnProperty.call(values, label)) {
+      throw new Error('値が指定されていません: ' + label);
+    }
+    return values[label];
+  });
 }
 
 /** 項目名から列番号（1始まり）を求める */
