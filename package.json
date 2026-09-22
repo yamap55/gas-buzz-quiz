@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Google Apps Script 製の早押し4択クイズアプリ",
+  "license": "MIT",
   "scripts": {
     "push": "clasp push",
     "pull": "clasp pull",
